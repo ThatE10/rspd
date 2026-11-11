@@ -1,0 +1,982 @@
+# Reproduction recipe: MUSE-Books: SRSPD sweeps vs KUDA and SimNPO (ports and authors' code)
+# Generated from the published run configs and result tables; doses are
+# mu_per_token (legacy doses are converted at load, recipes.legacy).
+result: muse_books
+title: 'MUSE-Books: SRSPD sweeps vs KUDA and SimNPO (ports and authors'' code)'
+description: VerbMem-f / KnowMem-f / PrivLeak / KnowMem-r by the package's re-implementation of the official
+  evaluator (srspd_experiments.eval.muse), fp32, greedy, one prompt at a time; the retrained model is
+  the PrivLeak reference.
+model: muse-bench/MUSE-books_target
+tensor_parallel_size: 1
+hardware:
+  method: 1x 80 GB GPU (H100), 8 CPU / 128 GiB host RAM for the fp32 SRSPD solves
+  eval: 1x 48 GB GPU (L40S)
+eval:
+  kind: muse
+  config:
+    corpus: books
+    tokenizer: meta-llama/Llama-2-7b-hf
+    dtype: float32
+    device_map: auto
+    metrics:
+    - verbmem_f
+    - privleak
+    - knowmem_f
+    - knowmem_r
+    verbmem_max_new_tokens: 128
+    knowmem_max_new_tokens: 32
+    privleak_auc_key: forget_holdout_Min-40%
+    reference: books_target
+    limit: null
+    batch_size: 1
+baseline:
+  id: target
+  label: Unmodified target
+  published:
+  - task: muse_books
+    metric: verbmem_f
+    value: 99.7016
+    tol: 1.0
+  - task: muse_books
+    metric: knowmem_f
+    value: 45.8791
+    tol: 1.0
+  - task: muse_books
+    metric: knowmem_r
+    value: 69.4009
+    tol: 1.0
+  - task: muse_books
+    metric: privleak
+    value: -57.1482
+    tol: 2.0
+references:
+- label: retrain-from-scratch reference (ours)
+  verbmem_f: 13.889628237316076
+  knowmem_f: 30.138042511486113
+  knowmem_r: 69.04961841554133
+  privleak: -0.037085110328178565
+- paper: KUDA arXiv:2602.19275v3
+  table: Table I
+  method: Origin
+  variant: published target checkpoint
+  verbmem_f: 99.59
+  knowmem_f: 58.76
+  privleak: 56.68
+  privleak_sign_convention: magnitude (abs)
+  knowmem_r: 67.0
+- paper: KUDA arXiv:2602.19275v3
+  table: Table I
+  method: Retrain
+  variant: published retrain checkpoint
+  verbmem_f: 14.35
+  knowmem_f: 28.9
+  privleak: 0.0
+  privleak_sign_convention: magnitude (abs)
+  knowmem_r: 74.38
+- paper: KUDA arXiv:2602.19275v3
+  table: Table I
+  method: GA
+  variant: their run; = MUSE GA_GDR
+  verbmem_f: 11.0
+  knowmem_f: 23.96
+  privleak: 40.5
+  privleak_sign_convention: magnitude (abs)
+  knowmem_r: 34.24
+- paper: KUDA arXiv:2602.19275v3
+  table: Table I
+  method: NPO
+  variant: their run (GradDiff, KL retain); = MUSE NPO_GDR
+  verbmem_f: 20.13
+  knowmem_f: 27.68
+  privleak: 41.35
+  privleak_sign_convention: magnitude (abs)
+  knowmem_r: 44.75
+- paper: KUDA arXiv:2602.19275v3
+  table: Table I
+  method: WHP
+  variant: their run
+  verbmem_f: 19.04
+  knowmem_f: 51.49
+  privleak: 51.56
+  privleak_sign_convention: magnitude (abs)
+  knowmem_r: 63.47
+- paper: KUDA arXiv:2602.19275v3
+  table: Table I
+  method: SimNPO
+  variant: their rerun
+  verbmem_f: 0.0
+  knowmem_f: 3.24
+  privleak: 17.15
+  privleak_sign_convention: magnitude (abs)
+  knowmem_r: 49.55
+- paper: KUDA arXiv:2602.19275v3
+  table: Table I
+  method: RMU
+  variant: their reimplementation on MUSE (grid search unreported)
+  verbmem_f: 7.04
+  knowmem_f: 30.92
+  privleak: 20.45
+  privleak_sign_convention: magnitude (abs)
+  knowmem_r: 58.37
+- paper: KUDA arXiv:2602.19275v3
+  table: Table I
+  method: KUDA
+  variant: their method
+  verbmem_f: 0.05
+  knowmem_f: 26.73
+  privleak: 16.55
+  privleak_sign_convention: magnitude (abs)
+  knowmem_r: 61.97
+- paper: SimNPO arXiv:2410.07163v2
+  table: Table 3
+  method: Original
+  variant: published target checkpoint
+  verbmem_f: 99.56
+  knowmem_f: 58.32
+  privleak: -56.32
+  privleak_sign_convention: signed (positive = over-unlearning)
+  knowmem_r: 67.01
+- paper: SimNPO arXiv:2410.07163v2
+  table: Table 3
+  method: Retrain
+  variant: published retrain checkpoint
+  verbmem_f: 14.3
+  knowmem_f: 28.9
+  privleak: 0.0
+  privleak_sign_convention: signed (positive = over-unlearning)
+  knowmem_r: 74.5
+- paper: SimNPO arXiv:2410.07163v2
+  table: Table 3
+  method: GA
+  variant: their run
+  verbmem_f: 0.0
+  knowmem_f: 0.0
+  privleak: -24.07
+  privleak_sign_convention: signed (positive = over-unlearning)
+  knowmem_r: 0.0
+- paper: SimNPO arXiv:2410.07163v2
+  table: Table 3
+  method: GradDiff
+  variant: their run
+  verbmem_f: 0.0
+  knowmem_f: 0.0
+  privleak: -24.59
+  privleak_sign_convention: signed (positive = over-unlearning)
+  knowmem_r: 0.13
+- paper: SimNPO arXiv:2410.07163v2
+  table: Table 3
+  method: Task Vector
+  variant: their run
+  verbmem_f: 99.31
+  knowmem_f: 35.55
+  privleak: -83.78
+  privleak_sign_convention: signed (positive = over-unlearning)
+  knowmem_r: 62.55
+- paper: SimNPO arXiv:2410.07163v2
+  table: Table 3
+  method: NPO
+  variant: their run
+  verbmem_f: 0.0
+  knowmem_f: 0.0
+  privleak: -31.17
+  privleak_sign_convention: signed (positive = over-unlearning)
+  knowmem_r: 23.71
+- paper: SimNPO arXiv:2410.07163v2
+  table: Table 3
+  method: SimNPO
+  variant: their method
+  verbmem_f: 0.0
+  knowmem_f: 0.0
+  privleak: -19.82
+  privleak_sign_convention: signed (positive = over-unlearning)
+  knowmem_r: 48.27
+- paper: MUSE arXiv:2407.06460v2
+  table: Table 3
+  method: Target
+  variant: published checkpoint (one decimal)
+  verbmem_f: 99.8
+  knowmem_f: 59.4
+  privleak: -57.5
+  privleak_sign_convention: signed (positive = over-unlearning)
+  knowmem_r: 66.9
+- paper: MUSE arXiv:2407.06460v2
+  table: Table 3
+  method: Retrain
+  variant: published checkpoint (one decimal)
+  verbmem_f: 14.3
+  knowmem_f: 28.9
+  privleak: 0.0
+  privleak_sign_convention: signed (positive = over-unlearning)
+  knowmem_r: 74.5
+- paper: MUSE arXiv:2407.06460v2
+  table: Table 3
+  method: GA
+  variant: benchmark's own run (one decimal)
+  verbmem_f: 0.0
+  knowmem_f: 0.0
+  privleak: -25.0
+  privleak_sign_convention: signed (positive = over-unlearning)
+  knowmem_r: 0.0
+- paper: MUSE arXiv:2407.06460v2
+  table: Table 3
+  method: GA_GDR
+  variant: benchmark's own run (one decimal)
+  verbmem_f: 0.0
+  knowmem_f: 0.0
+  privleak: -26.5
+  privleak_sign_convention: signed (positive = over-unlearning)
+  knowmem_r: 10.7
+- paper: MUSE arXiv:2407.06460v2
+  table: Table 3
+  method: GA_KLR
+  variant: benchmark's own run (one decimal)
+  verbmem_f: 16.0
+  knowmem_f: 21.9
+  privleak: -40.2
+  privleak_sign_convention: signed (positive = over-unlearning)
+  knowmem_r: 37.2
+- paper: MUSE arXiv:2407.06460v2
+  table: Table 3
+  method: NPO
+  variant: benchmark's own run (one decimal)
+  verbmem_f: 0.0
+  knowmem_f: 0.0
+  privleak: -24.3
+  privleak_sign_convention: signed (positive = over-unlearning)
+  knowmem_r: 0.0
+- paper: MUSE arXiv:2407.06460v2
+  table: Table 3
+  method: NPO_GDR
+  variant: benchmark's own run (one decimal)
+  verbmem_f: 0.0
+  knowmem_f: 0.0
+  privleak: -30.8
+  privleak_sign_convention: signed (positive = over-unlearning)
+  knowmem_r: 22.8
+- paper: MUSE arXiv:2407.06460v2
+  table: Table 3
+  method: NPO_KLR
+  variant: benchmark's own run (one decimal)
+  verbmem_f: 17.0
+  knowmem_f: 25.0
+  privleak: -43.5
+  privleak_sign_convention: signed (positive = over-unlearning)
+  knowmem_r: 44.6
+- paper: MUSE arXiv:2407.06460v2
+  table: Table 3
+  method: Task Vector
+  variant: benchmark's own run (one decimal)
+  verbmem_f: 99.7
+  knowmem_f: 52.4
+  privleak: -57.5
+  privleak_sign_convention: signed (positive = over-unlearning)
+  knowmem_r: 64.7
+- paper: MUSE arXiv:2407.06460v2
+  table: Table 3
+  method: WHP
+  variant: benchmark's own run (one decimal)
+  verbmem_f: 18.0
+  knowmem_f: 55.7
+  privleak: 56.5
+  privleak_sign_convention: signed (positive = over-unlearning)
+  knowmem_r: 63.6
+runs:
+- id: kuda
+  method: kuda
+  label: KUDA, port constant-lr
+  config:
+    name: muse_books_kuda
+    model: muse-bench/MUSE-books_target
+    tokenizer: meta-llama/Llama-2-7b-hf
+    dtype: bfloat16
+    device_map: auto
+    seed: 42
+    kuda:
+      beta: 0.1
+      tau: 0.08
+      alpha:
+      - 1.0
+      lr: 1.0e-05
+      batch_size: 4
+      max_num_batches: 100000
+      epoch: 5
+      init_jitter: 0.0
+      layer_id: 7
+      layer_ids:
+      - 4
+      - 5
+      - 6
+      - 7
+      module_name: mlp.down_proj
+      min_len: 0
+      forget_corpora:
+      - muse-books-forget
+      retain_corpora:
+      - muse-books-retain1
+      forget_max_length: 1024
+      retain_max_length: 1024
+      cycle_retain: true
+      nullspace:
+        sample_p: 100
+        max_cov_texts: null
+        max_length: 1024
+        batch_size: 4
+        svd_device: auto
+        cov_device: auto
+        cov_dtype: bfloat16
+        use_cache: true
+  exports:
+  - id: kuda
+    weights: null
+    published:
+    - task: muse_books
+      metric: verbmem_f
+      value: 0.0
+      tol: 1.0
+    - task: muse_books
+      metric: knowmem_f
+      value: 2.979
+      tol: 1.0
+    - task: muse_books
+      metric: knowmem_r
+      value: 60.9248
+      tol: 1.0
+    - task: muse_books
+      metric: privleak
+      value: 14.5003
+      tol: 2.0
+- id: kuda_sched
+  method: kuda
+  label: KUDA, port sched
+  config:
+    name: muse_books_kuda_sched
+    model: muse-bench/MUSE-books_target
+    tokenizer: meta-llama/Llama-2-7b-hf
+    dtype: bfloat16
+    device_map: auto
+    seed: 42
+    kuda:
+      beta: 0.1
+      tau: 0.08
+      alpha:
+      - 1.0
+      lr: 1.0e-05
+      batch_size: 4
+      max_num_batches: 100000
+      epoch: 5
+      lr_schedule: linear_decay
+      schedule_epochs: 5
+      weight_decay: 0.01
+      init_jitter: 0.0
+      layer_id: 7
+      layer_ids:
+      - 4
+      - 5
+      - 6
+      - 7
+      module_name: mlp.down_proj
+      min_len: 0
+      forget_corpora:
+      - muse-books-forget
+      retain_corpora:
+      - muse-books-retain1
+      forget_max_length: 1024
+      retain_max_length: 1024
+      cycle_retain: true
+      nullspace:
+        sample_p: 100
+        max_cov_texts: null
+        max_length: 1024
+        batch_size: 4
+        svd_device: auto
+        cov_device: auto
+        cov_dtype: bfloat16
+        use_cache: true
+  exports:
+  - id: kuda_sched
+    weights: null
+    published:
+    - task: muse_books
+      metric: verbmem_f
+      value: 1.5887
+      tol: 1.0
+    - task: muse_books
+      metric: knowmem_f
+      value: 37.0366
+      tol: 1.0
+    - task: muse_books
+      metric: knowmem_r
+      value: 65.8267
+      tol: 1.0
+    - task: muse_books
+      metric: privleak
+      value: 33.4322
+      tol: 2.0
+- id: simnpo
+  method: simnpo
+  label: SimNPO, paper-loss warmup-decay
+  config:
+    name: muse_books_simnpo
+    model: muse-bench/MUSE-books_target
+    tokenizer: meta-llama/Llama-2-7b-hf
+    dtype: bfloat16
+    device_map: auto
+    seed: 42
+    simnpo:
+      beta: 0.75
+      gamma: 0.1
+      forget_weight: 1.0
+      retain_weight: 0.1
+      forget_corpora:
+      - muse-books-forget
+      retain_corpus: muse-books-retain1
+      min_len: 0
+      forget_max_length: 2048
+      retain_max_length: 2048
+      max_rows: null
+    train:
+      optim: adamw_torch
+      lr: 1.0e-05
+      max_steps: null
+      num_epochs: 10
+      batch_size: 1
+      grad_accum: 4
+      weight_decay: 0.0
+      max_grad_norm: 1.0
+      warmup_steps: null
+      bf16: true
+      gradient_checkpointing: true
+      log_every: 10
+  exports:
+  - id: simnpo
+    weights: null
+    published:
+    - task: muse_books
+      metric: verbmem_f
+      value: 1.276
+      tol: 1.0
+    - task: muse_books
+      metric: knowmem_f
+      value: 31.4484
+      tol: 1.0
+    - task: muse_books
+      metric: knowmem_r
+      value: 50.9533
+      tol: 1.0
+    - task: muse_books
+      metric: privleak
+      value: -37.6785
+      tol: 2.0
+- id: simnpo_sched
+  method: simnpo
+  label: SimNPO, paper-loss constant-lr
+  config:
+    name: muse_books_simnpo_sched
+    model: muse-bench/MUSE-books_target
+    tokenizer: meta-llama/Llama-2-7b-hf
+    dtype: bfloat16
+    device_map: auto
+    seed: 42
+    simnpo:
+      beta: 0.75
+      gamma: 0.1
+      forget_weight: 1.0
+      retain_weight: 0.1
+      forget_corpora:
+      - muse-books-forget
+      retain_corpus: muse-books-retain1
+      min_len: 0
+      forget_max_length: 2048
+      retain_max_length: 2048
+      max_rows: null
+    train:
+      optim: adamw_torch
+      lr: 1.0e-05
+      max_steps: null
+      num_epochs: 10
+      batch_size: 1
+      grad_accum: 4
+      weight_decay: 0.0
+      max_grad_norm: 1.0
+      lr_schedule: constant
+      warmup_steps: 0
+      bf16: true
+      gradient_checkpointing: true
+      log_every: 10
+  exports:
+  - id: simnpo_sched
+    weights: null
+    published:
+    - task: muse_books
+      metric: verbmem_f
+      value: 0.7516
+      tol: 1.0
+    - task: muse_books
+      metric: knowmem_f
+      value: 31.7844
+      tol: 1.0
+    - task: muse_books
+      metric: knowmem_r
+      value: 52.2483
+      tol: 1.0
+    - task: muse_books
+      metric: privleak
+      value: -38.8096
+      tol: 2.0
+- id: simnpo_upstreamloss
+  method: simnpo
+  label: SimNPO, upstream-loss warmup-decay
+  config:
+    name: muse_books_simnpo_upstreamloss
+    model: muse-bench/MUSE-books_target
+    tokenizer: meta-llama/Llama-2-7b-hf
+    dtype: bfloat16
+    device_map: auto
+    seed: 42
+    simnpo:
+      loss_form: muse_upstream
+      beta: 0.75
+      gamma: 0.1
+      forget_weight: 1.0
+      retain_weight: 0.1
+      forget_corpora:
+      - muse-books-forget
+      retain_corpus: muse-books-retain1
+      min_len: 0
+      forget_max_length: 2048
+      retain_max_length: 2048
+      max_rows: null
+    train:
+      optim: adamw_torch
+      lr: 1.0e-05
+      max_steps: null
+      num_epochs: 10
+      batch_size: 1
+      grad_accum: 4
+      weight_decay: 0.0
+      max_grad_norm: 1.0
+      warmup_steps: null
+      bf16: true
+      gradient_checkpointing: true
+      log_every: 10
+  exports:
+  - id: simnpo_upstreamloss
+    weights: null
+    published:
+    - task: muse_books
+      metric: verbmem_f
+      value: 0.0
+      tol: 1.0
+    - task: muse_books
+      metric: knowmem_f
+      value: 1.5
+      tol: 1.0
+    - task: muse_books
+      metric: knowmem_r
+      value: 43.7712
+      tol: 1.0
+    - task: muse_books
+      metric: privleak
+      value: -31.0402
+      tol: 2.0
+- id: simnpo_upstreamloss_sched
+  method: simnpo
+  label: SimNPO, upstream-loss constant-lr
+  config:
+    name: muse_books_simnpo_upstreamloss_sched
+    model: muse-bench/MUSE-books_target
+    tokenizer: meta-llama/Llama-2-7b-hf
+    dtype: bfloat16
+    device_map: auto
+    seed: 42
+    simnpo:
+      loss_form: muse_upstream
+      beta: 0.75
+      gamma: 0.1
+      forget_weight: 1.0
+      retain_weight: 0.1
+      forget_corpora:
+      - muse-books-forget
+      retain_corpus: muse-books-retain1
+      min_len: 0
+      forget_max_length: 2048
+      retain_max_length: 2048
+      max_rows: null
+    train:
+      optim: adamw_torch
+      lr: 1.0e-05
+      max_steps: null
+      num_epochs: 10
+      batch_size: 1
+      grad_accum: 4
+      weight_decay: 0.0
+      max_grad_norm: 1.0
+      lr_schedule: constant
+      warmup_steps: 0
+      bf16: true
+      gradient_checkpointing: true
+      log_every: 10
+  exports:
+  - id: simnpo_upstreamloss_sched
+    weights: null
+    published:
+    - task: muse_books
+      metric: verbmem_f
+      value: 0.0
+      tol: 1.0
+    - task: muse_books
+      metric: knowmem_f
+      value: 0.0
+      tol: 1.0
+    - task: muse_books
+      metric: knowmem_r
+      value: 50.6689
+      tol: 1.0
+    - task: muse_books
+      metric: privleak
+      value: -23.0113
+      tol: 2.0
+- id: kuda_authors_code
+  method: kuda_authors_code_muse
+  label: KUDA, authors' code (MUSE track, authors' stack)
+  config:
+    corpus: books
+  exports:
+  - id: kuda_authors_code_ep5
+    checkpoint_subdir: kuda_authors_code_muse_books_ep5
+    weights: null
+    published:
+    - task: muse_books
+      metric: verbmem_f
+      value: 1.6747
+      tol: 1.0
+    - task: muse_books
+      metric: knowmem_f
+      value: 42.2461
+      tol: 1.0
+    - task: muse_books
+      metric: knowmem_r
+      value: 62.3536
+      tol: 1.0
+    - task: muse_books
+      metric: privleak
+      value: 39.8665
+      tol: 2.0
+- id: srspd_retain1
+  method: srspd
+  label: SRSPD, retained set retain1, fp32, grams solve
+  config:
+    name: muse_books_srspd_retain1
+    model: muse-bench/MUSE-books_target
+    tokenizer: meta-llama/Llama-2-7b-hf
+    dtype: float32
+    device_map: auto
+    seed: 42
+    data:
+      target:
+        corpora:
+        - muse-books-forget
+        max_length: 1024
+        heldout_rows: 8
+      heldout_retain_corpora:
+      - muse-books-retain2
+      retain_max_length: 1024
+      heldout_mix_tokens: 0
+      retained:
+        buckets:
+        - name: retain1
+          dataset: muse-bench/MUSE-Books
+          config: raw
+          split: retain1
+          revision: 051ba90319e920d410d87cfdbd61f25843c1b892
+          text_field: text
+          tokens: 214016
+          min_chars: 0
+        chunk_tokens: 1024
+        seed: 20260812
+        add_bos: true
+        chat_template: null
+    srspd:
+      solver: grams
+      ridge_rel: 1.0e-10
+      gram_budget_gib: 16.0
+      resume_from_cache: true
+      eig_extremes: true
+      lam_svd_dtype: float32
+      scratch_dir: null
+  exports:
+  - id: srspd_retain1_mpt0.001
+    mu_per_token: 0.001
+    weights: null
+    published:
+    - task: muse_books
+      metric: verbmem_f
+      value: 53.6836
+      tol: 1.0
+    - task: muse_books
+      metric: knowmem_f
+      value: 8.7893
+      tol: 1.0
+    - task: muse_books
+      metric: knowmem_r
+      value: 58.4082
+      tol: 1.0
+    - task: muse_books
+      metric: privleak
+      value: -54.478
+      tol: 2.0
+  - id: srspd_retain1_mpt0.003
+    mu_per_token: 0.003
+    weights: null
+    published:
+    - task: muse_books
+      metric: verbmem_f
+      value: 15.9626
+      tol: 1.0
+    - task: muse_books
+      metric: knowmem_f
+      value: 10.0411
+      tol: 1.0
+    - task: muse_books
+      metric: knowmem_r
+      value: 1.6486
+      tol: 1.0
+    - task: muse_books
+      metric: privleak
+      value: -72.6312
+      tol: 2.0
+  - id: srspd_retain1_mpt0.01
+    mu_per_token: 0.01
+    weights: null
+    published:
+    - task: muse_books
+      metric: verbmem_f
+      value: 7.6025
+      tol: 1.0
+    - task: muse_books
+      metric: knowmem_f
+      value: 1.2176
+      tol: 1.0
+    - task: muse_books
+      metric: knowmem_r
+      value: 0.2688
+      tol: 1.0
+    - task: muse_books
+      metric: privleak
+      value: -30.484
+      tol: 2.0
+  - id: srspd_retain1_mpt0.03
+    mu_per_token: 0.03
+    weights: null
+    published:
+    - task: muse_books
+      metric: verbmem_f
+      value: 5.938
+      tol: 1.0
+    - task: muse_books
+      metric: knowmem_f
+      value: 1.5964
+      tol: 1.0
+    - task: muse_books
+      metric: knowmem_r
+      value: 1.3486
+      tol: 1.0
+    - task: muse_books
+      metric: privleak
+      value: -34.8044
+      tol: 2.0
+  - id: srspd_retain1_mpt0.1
+    mu_per_token: 0.1
+    weights: null
+    published:
+    - task: muse_books
+      metric: verbmem_f
+      value: 5.6199
+      tol: 1.0
+    - task: muse_books
+      metric: knowmem_f
+      value: 3.9495
+      tol: 1.0
+    - task: muse_books
+      metric: knowmem_r
+      value: 0.0588
+      tol: 1.0
+    - task: muse_books
+      metric: privleak
+      value: -15.6685
+      tol: 2.0
+- id: srspd_retain1_mix1m
+  method: srspd
+  label: SRSPD, retained set retain1 + 1M mix, fp32, grams solve
+  config:
+    name: muse_books_srspd_retain1_mix1m
+    model: muse-bench/MUSE-books_target
+    tokenizer: meta-llama/Llama-2-7b-hf
+    dtype: float32
+    device_map: auto
+    seed: 42
+    data:
+      target:
+        corpora:
+        - muse-books-forget
+        max_length: 1024
+        heldout_rows: 8
+      heldout_retain_corpora:
+      - muse-books-retain2
+      retain_max_length: 1024
+      heldout_mix_tokens: 0
+      retained:
+        buckets:
+        - name: retain1
+          dataset: muse-bench/MUSE-Books
+          config: raw
+          split: retain1
+          revision: 051ba90319e920d410d87cfdbd61f25843c1b892
+          text_field: text
+          tokens: 214016
+          min_chars: 0
+        - name: en_prose
+          dataset: HuggingFaceFW/fineweb-edu
+          config: sample-10BT
+          split: train
+          revision: 87f09149ef4734204d70ed1d046ddc9ca3f2b8f9
+          text_field: text
+          tokens: 200000
+          min_chars: 512
+        - name: de_web
+          dataset: HuggingFaceFW/fineweb-2
+          config: deu_Latn
+          split: train
+          revision: af9c13333eb981300149d5ca60a8e9d659b276b9
+          text_field: text
+          tokens: 400000
+          min_chars: 512
+        - name: code
+          dataset: codeparrot/codeparrot-clean-valid
+          config: default
+          split: train
+          revision: 4db92d2ec0c1b4c41eeb439cfae16854511d9dcd
+          text_field: content
+          tokens: 200000
+          min_chars: 256
+        - name: de_wiki
+          dataset: wikimedia/wikipedia
+          config: 20231101.de
+          split: train
+          revision: b04c8d1ceb2f5cd4588862100d08de323dccfbaa
+          text_field: text
+          tokens: 200000
+          min_chars: 512
+        chunk_tokens: 1024
+        seed: 20260812
+        add_bos: true
+        chat_template: null
+    srspd:
+      solver: grams
+      ridge_rel: 1.0e-10
+      gram_budget_gib: 16.0
+      resume_from_cache: true
+      eig_extremes: true
+      lam_svd_dtype: float32
+      scratch_dir: null
+  exports:
+  - id: srspd_retain1_mix1m_mpt0.001
+    mu_per_token: 0.001
+    weights: null
+    published:
+    - task: muse_books
+      metric: verbmem_f
+      value: 98.1795
+      tol: 1.0
+    - task: muse_books
+      metric: knowmem_f
+      value: 43.5889
+      tol: 1.0
+    - task: muse_books
+      metric: knowmem_r
+      value: 66.3969
+      tol: 1.0
+    - task: muse_books
+      metric: privleak
+      value: -60.0037
+      tol: 2.0
+  - id: srspd_retain1_mix1m_mpt0.003
+    mu_per_token: 0.003
+    weights: null
+    published:
+    - task: muse_books
+      metric: verbmem_f
+      value: 56.2374
+      tol: 1.0
+    - task: muse_books
+      metric: knowmem_f
+      value: 41.821
+      tol: 1.0
+    - task: muse_books
+      metric: knowmem_r
+      value: 64.5473
+      tol: 1.0
+    - task: muse_books
+      metric: privleak
+      value: -59.5401
+      tol: 2.0
+  - id: srspd_retain1_mix1m_mpt0.01
+    mu_per_token: 0.01
+    weights: null
+    published:
+    - task: muse_books
+      metric: verbmem_f
+      value: 13.735
+      tol: 1.0
+    - task: muse_books
+      metric: knowmem_f
+      value: 33.3741
+      tol: 1.0
+    - task: muse_books
+      metric: knowmem_r
+      value: 60.0041
+      tol: 1.0
+    - task: muse_books
+      metric: privleak
+      value: -76.8218
+      tol: 2.0
+  - id: srspd_retain1_mix1m_mpt0.03
+    mu_per_token: 0.03
+    weights: null
+    published:
+    - task: muse_books
+      metric: verbmem_f
+      value: 4.7708
+      tol: 1.0
+    - task: muse_books
+      metric: knowmem_f
+      value: 8.2233
+      tol: 1.0
+    - task: muse_books
+      metric: knowmem_r
+      value: 30.9952
+      tol: 1.0
+    - task: muse_books
+      metric: privleak
+      value: -33.3395
+      tol: 2.0
+  - id: srspd_retain1_mix1m_mpt0.1
+    mu_per_token: 0.1
+    weights: null
+    published:
+    - task: muse_books
+      metric: verbmem_f
+      value: 2.0017
+      tol: 1.0
+    - task: muse_books
+      metric: knowmem_f
+      value: 0.0
+      tol: 1.0
+    - task: muse_books
+      metric: knowmem_r
+      value: 0.5
+      tol: 1.0
+    - task: muse_books
+      metric: privleak
+      value: -47.8583
+      tol: 2.0

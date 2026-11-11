@@ -40,7 +40,7 @@ def tiny_tokenizer():
                                   unk_token="[UNK]")
 
 
-def save_checkpoint(data_root, rel="models/gpt2/gpt2_trilingual_pretrain/checkpoint"):
+def save_checkpoint(data_root, rel="models/recipes/gpt2_trilingual_base"):
     """A tiny GPT-2 + fast tokenizer at a data-root checkpoint reference;
     returns ``(rel, abs)``."""
     path = os.path.join(str(data_root), rel)

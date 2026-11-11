@@ -1,0 +1,1484 @@
+# Reproduction recipe: WMDP on Zephyr-7B-beta: SRSPD (f600 / f16 series) vs RMU, KUDA, SimNPO
+# Generated from the published run configs and result tables; doses are
+# mu_per_token (legacy doses are converted at load, recipes.legacy).
+result: zephyr_wmdp
+title: 'WMDP on Zephyr-7B-beta: SRSPD (f600 / f16 series) vs RMU, KUDA, SimNPO'
+description: WMDP-Bio / WMDP-Cyber / MMLU (zero-shot log-likelihood over A-D, lm-eval 0.4.12 on vLLM 0.26.0,
+  bf16, TP=1, max_model_len 4096) and WikiText word perplexity; KRD = harmonic mean over bio/cyber of
+  clip((base - edit)/(base - 0.25), 0, 1) (srspd_experiments.eval.krd).
+model: HuggingFaceH4/zephyr-7b-beta
+tensor_parallel_size: 1
+hardware:
+  method: 1x 80 GB GPU (H100); the SRSPD solves 8 CPU / 128 GiB host RAM; the SimNPO port and KUDA need
+    two resident copies
+  eval: 1x 48 GB GPU (L40S), about 3 h per checkpoint
+eval:
+  kind: lm_eval
+  config:
+    backend: vllm
+    model_args:
+      dtype: bfloat16
+      gpu_memory_utilization: 0.85
+      max_model_len: 4096
+    tasks:
+    - wmdp_bio
+    - wmdp_cyber
+    - mmlu
+    batch_size: auto
+    limit: null
+    log_samples: false
+  extra:
+  - id: wikitext
+    config:
+      backend: vllm
+      model_args:
+        dtype: bfloat16
+        gpu_memory_utilization: 0.85
+        max_model_len: 4096
+      tasks:
+      - wikitext
+      batch_size: auto
+      limit: null
+      log_samples: false
+baseline:
+  id: unmodified
+  label: Unmodified
+  published:
+  - task: wmdp_bio
+    metric: acc
+    value: 0.6426
+    tol: 0.015
+  - task: wmdp_cyber
+    metric: acc
+    value: 0.4293
+    tol: 0.015
+  - task: mmlu
+    metric: acc
+    value: 0.5889
+    tol: 0.015
+  - task: wikitext
+    metric: word_perplexity
+    value: 9.7099
+    rel_tol: 0.02
+references:
+- label: Zephyr-7B-β base (WMDP paper)
+  method: Unmodified
+  setting: as printed
+  wmdp_bio: 0.637
+  wmdp_cyber: 0.44
+  mmlu: 0.581
+  source: WMDP/RMU paper (arXiv 2403.03218), Table 1, zephyr-7b
+- label: RMU (WMDP paper)
+  method: RMU
+  setting: layer 7 (updates layers 5-7, MLP only), alpha 1200, c 6.5; lm-eval v0.4.2 zero-shot
+  wmdp_bio: 0.312
+  wmdp_cyber: 0.282
+  mmlu: 0.571
+  source: WMDP/RMU paper (arXiv 2403.03218), Table 1, zephyr-7b
+- label: Zephyr-7B-β origin (KUDA paper)
+  method: Unmodified
+  setting: as printed
+  wmdp_bio: 0.6382
+  wmdp_cyber: 0.4378
+  mmlu: 0.5813
+  source: KUDA paper (arXiv 2602.19275), Table II, Zephyr
+- label: RMU (KUDA paper)
+  method: RMU
+  setting: the KUDA authors' RMU re-run
+  wmdp_bio: 0.2922
+  wmdp_cyber: 0.2793
+  mmlu: 0.569
+  source: KUDA paper (arXiv 2602.19275), Table II, Zephyr
+- label: KUDA (KUDA paper)
+  method: KUDA
+  setting: beta 2.0, tau 2e-3, lr 1e-5, batch 4, 1 epoch
+  wmdp_bio: 0.2992
+  wmdp_cyber: 0.2682
+  mmlu: 0.5714
+  source: KUDA paper (arXiv 2602.19275), Table II, Zephyr
+- label: SimNPO (KUDA paper)
+  method: SimNPO
+  setting: the KUDA authors' SimNPO re-run
+  wmdp_bio: 0.3961
+  wmdp_cyber: 0.3379
+  mmlu: 0.4826
+  source: KUDA paper (arXiv 2602.19275), Table II, Zephyr
+- label: NPO (KUDA paper)
+  method: NPO
+  setting: the KUDA authors' NPO re-run
+  wmdp_bio: 0.4293
+  wmdp_cyber: 0.3634
+  mmlu: 0.4571
+  source: KUDA paper (arXiv 2602.19275), Table II, Zephyr
+- label: Zephyr-7B-β original (SimNPO paper)
+  method: Unmodified
+  setting: as printed (whole percents)
+  wmdp_bio: 0.65
+  wmdp_cyber: null
+  mmlu: 0.59
+  source: SimNPO paper (arXiv 2410.07163), Table A4, Zephyr, bio-only forget
+- label: RMU (SimNPO paper)
+  method: RMU
+  setting: bio-only forget; as printed (whole percents)
+  wmdp_bio: 0.32
+  wmdp_cyber: null
+  mmlu: 0.57
+  source: SimNPO paper (arXiv 2410.07163), Table A4, Zephyr, bio-only forget
+- label: NPO (SimNPO paper)
+  method: NPO
+  setting: bio-only forget; as printed (whole percents)
+  wmdp_bio: 0.26
+  wmdp_cyber: null
+  mmlu: 0.44
+  source: SimNPO paper (arXiv 2410.07163), Table A4, Zephyr, bio-only forget
+- label: SimNPO (SimNPO paper)
+  method: SimNPO
+  setting: 'bio-only forget, 125 steps, lr 2.5e-6-5e-6, beta grid, lambda 5.0 (the repo config differs:
+    500 steps, lr 9.5e-6, beta 0.1)'
+  wmdp_bio: 0.26
+  wmdp_cyber: null
+  mmlu: 0.48
+  source: SimNPO paper (arXiv 2410.07163), Table A4, Zephyr, bio-only forget
+runs:
+- id: rmu
+  method: rmu
+  label: RMU, 150 steps (published recipe)
+  config:
+    name: zephyr_wmdp_rmu
+    model: HuggingFaceH4/zephyr-7b-beta
+    dtype: bfloat16
+    device_map: cuda
+    rmu:
+      forget_corpora:
+      - bio-forget-corpus
+      - cyber-forget-corpus
+      retain_corpora:
+      - wikitext
+      - wikitext
+      steering_coeffs:
+      - 6.5
+      - 6.5
+      alpha:
+      - 1200.0
+      - 1200.0
+      lr: 5.0e-05
+      max_num_batches: 150
+      batch_size: 4
+      layer_id: 7
+      layer_ids:
+      - 5
+      - 6
+      - 7
+      min_len: 50
+      seed: 42
+      verbose: true
+  exports:
+  - id: rmu
+    weights:
+      repo: thate10/rspd-wmdp-rmu-zephyr-7b
+      subfolder: null
+      private: true
+    published:
+    - task: wmdp_bio
+      metric: acc
+      value: 0.3315
+      tol: 0.015
+    - task: wmdp_cyber
+      metric: acc
+      value: 0.2743
+      tol: 0.015
+    - task: mmlu
+      metric: acc
+      value: 0.5731
+      tol: 0.015
+    - task: wikitext
+      metric: word_perplexity
+      value: 9.7719
+      rel_tol: 0.02
+- id: kuda_authors_code
+  method: kuda_authors_code
+  label: KUDA, authors' code
+  config:
+    model: HuggingFaceH4/zephyr-7b-beta
+  exports:
+  - id: kuda_authors_code
+    weights:
+      repo: thate10/rspd-wmdp-kuda-zephyr-7b-authors-code
+      subfolder: null
+      private: true
+    published:
+    - task: wmdp_bio
+      metric: acc
+      value: 0.2687
+      tol: 0.015
+    - task: wmdp_cyber
+      metric: acc
+      value: 0.2677
+      tol: 0.015
+    - task: mmlu
+      metric: acc
+      value: 0.5315
+      tol: 0.015
+    - task: wikitext
+      metric: word_perplexity
+      value: 9.7942
+      rel_tol: 0.02
+- id: kuda_port
+  method: kuda
+  label: KUDA, port (faithful)
+  config:
+    name: zephyr_wmdp_kuda_port
+    model: HuggingFaceH4/zephyr-7b-beta
+    dtype: bfloat16
+    device_map: auto
+    seed: 42
+    kuda:
+      beta: 2.0
+      tau: 0.002
+      alpha:
+      - 1.0
+      - 1.0
+      lr: 1.0e-05
+      batch_size: 4
+      max_num_batches: 150
+      epoch: 1
+      init_jitter: 0.0
+      layer_id: 9
+      layer_ids:
+      - 6
+      - 7
+      - 8
+      - 9
+      module_name: mlp.down_proj
+      min_len: 0
+      forget_corpora:
+      - bio-forget-corpus
+      - cyber-forget-corpus
+      retain_corpora:
+      - wikitext
+      - wikitext
+      retain_max_length: 512
+      nullspace:
+        sample_p: 100
+        max_cov_texts: null
+        max_length: 4096
+        batch_size: 4
+        svd_device: auto
+        cov_device: auto
+        cov_dtype: bfloat16
+        use_cache: false
+  exports:
+  - id: kuda_port
+    weights: null
+    notes: the published HF repo of the port holds the first port run, not this configuration
+    published:
+    - task: wmdp_bio
+      metric: acc
+      value: 0.2545
+      tol: 0.015
+    - task: wmdp_cyber
+      metric: acc
+      value: 0.2677
+      tol: 0.015
+    - task: mmlu
+      metric: acc
+      value: 0.4596
+      tol: 0.015
+    - task: wikitext
+      metric: word_perplexity
+      value: 10.2045
+      rel_tol: 0.02
+- id: simnpo_port
+  method: simnpo
+  label: SimNPO, bio+cyber port
+  config:
+    name: zephyr_wmdp_simnpo_port
+    model: HuggingFaceH4/zephyr-7b-beta
+    dtype: bfloat16
+    device_map: auto
+    seed: 42
+    simnpo:
+      beta: 0.1
+      gamma: 0.0
+      forget_weight: 1.0
+      retain_weight: 1.0
+      forget_corpora:
+      - bio-forget-corpus
+      - cyber-forget-corpus
+      retain_corpus: wikitext
+      min_len: 50
+      retain_max_length: 512
+      max_rows: null
+    train:
+      optim: adamw_torch
+      lr: 9.5e-06
+      max_steps: 500
+      num_epochs: 5
+      batch_size: 1
+      grad_accum: 4
+      weight_decay: 0.0
+      max_grad_norm: 1.0
+      warmup_steps: null
+      bf16: true
+      gradient_checkpointing: true
+      log_every: 10
+  exports:
+  - id: simnpo_port
+    weights:
+      repo: thate10/rspd-wmdp-simnpo-zephyr-7b-beta
+      subfolder: null
+      private: true
+    published:
+    - task: wmdp_bio
+      metric: acc
+      value: 0.2632
+      tol: 0.015
+    - task: wmdp_cyber
+      metric: acc
+      value: 0.2763
+      tol: 0.015
+    - task: mmlu
+      metric: acc
+      value: 0.4387
+      tol: 0.015
+    - task: wikitext
+      metric: word_perplexity
+      value: 111988.7228
+      rel_tol: 0.02
+- id: simnpo_port_bioonly
+  method: simnpo
+  label: SimNPO, bio-only port
+  config:
+    name: zephyr_wmdp_simnpo_port_bioonly
+    model: HuggingFaceH4/zephyr-7b-beta
+    dtype: bfloat16
+    device_map: auto
+    seed: 42
+    simnpo:
+      beta: 0.1
+      gamma: 0.0
+      forget_weight: 1.0
+      retain_weight: 1.0
+      forget_corpora:
+      - bio-forget-corpus
+      retain_corpus: wikitext
+      min_len: 50
+      retain_max_length: 512
+      max_rows: null
+    train:
+      optim: adamw_torch
+      lr: 9.5e-06
+      max_steps: 500
+      num_epochs: 5
+      batch_size: 1
+      grad_accum: 4
+      weight_decay: 0.0
+      max_grad_norm: 1.0
+      warmup_steps: null
+      bf16: true
+      gradient_checkpointing: true
+      log_every: 10
+  exports:
+  - id: simnpo_port_bioonly
+    weights:
+      repo: thate10/rspd-wmdp-simnpo-zephyr-7b-bioonly
+      subfolder: null
+      private: true
+    published:
+    - task: wmdp_bio
+      metric: acc
+      value: 0.2789
+      tol: 0.015
+    - task: wmdp_cyber
+      metric: acc
+      value: 0.3654
+      tol: 0.015
+    - task: mmlu
+      metric: acc
+      value: 0.4922
+      tol: 0.015
+    - task: wikitext
+      metric: word_perplexity
+      value: 13.8084
+      rel_tol: 0.02
+- id: simnpo_authors_code
+  method: simnpo_authors_code
+  label: SimNPO, authors' code (bio only)
+  config:
+    model: HuggingFaceH4/zephyr-7b-beta
+  exports:
+  - id: simnpo_authors_code
+    weights: null
+    published:
+    - task: wmdp_bio
+      metric: acc
+      value: 0.3095
+      tol: 0.015
+    - task: wmdp_cyber
+      metric: acc
+      value: 0.3649
+      tol: 0.015
+    - task: mmlu
+      metric: acc
+      value: 0.5214
+      tol: 0.015
+    - task: wikitext
+      metric: word_perplexity
+      value: 144.2218
+      rel_tol: 0.02
+- id: srspd_mix1m
+  method: srspd
+  label: SRSPD, 8 forget documents per corpus, 1M-mix retained set (readout solve)
+  config:
+    name: zephyr_wmdp_srspd_mix1m
+    model: HuggingFaceH4/zephyr-7b-beta
+    dtype: bfloat16
+    device_map: auto
+    seed: 42
+    data:
+      target:
+        corpora:
+        - bio-forget-corpus
+        - cyber-forget-corpus
+        max_rows: 4
+        min_len: 50
+        max_length: 768
+        heldout_rows: 8
+      heldout_retain_corpora:
+      - wikitext
+      retain_max_length: 512
+      heldout_mix_tokens: 2048
+      retained:
+        buckets:
+        - name: en_prose
+          dataset: HuggingFaceFW/fineweb-edu
+          config: sample-10BT
+          split: train
+          revision: 87f09149ef4734204d70ed1d046ddc9ca3f2b8f9
+          text_field: text
+          tokens: 200000
+          min_chars: 512
+        - name: de_web
+          dataset: HuggingFaceFW/fineweb-2
+          config: deu_Latn
+          split: train
+          revision: af9c13333eb981300149d5ca60a8e9d659b276b9
+          text_field: text
+          tokens: 400000
+          min_chars: 512
+        - name: code
+          dataset: codeparrot/codeparrot-clean-valid
+          config: default
+          split: train
+          revision: 4db92d2ec0c1b4c41eeb439cfae16854511d9dcd
+          text_field: content
+          tokens: 200000
+          min_chars: 256
+        - name: de_wiki
+          dataset: wikimedia/wikipedia
+          config: 20231101.de
+          split: train
+          revision: b04c8d1ceb2f5cd4588862100d08de323dccfbaa
+          text_field: text
+          tokens: 200000
+          min_chars: 512
+        chunk_tokens: 1024
+        seed: 20260812
+        add_bos: true
+        chat_template: null
+    srspd:
+      solver: readout
+      ridge_rel: 1.0e-10
+      gram_budget_gib: 24.0
+      resume_from_cache: true
+      eig_extremes: true
+      lam_svd_dtype: float32
+      scratch_dir: null
+  legacy_counts:
+    n_x: 5500
+    n_y: 999424
+  exports:
+  - id: srspd_mix1m
+    legacy:
+      mu_raw: 1.0
+    weights: null
+    published:
+    - task: wmdp_bio
+      metric: acc
+      value: 0.4808
+      tol: 0.015
+    - task: wmdp_cyber
+      metric: acc
+      value: 0.3407
+      tol: 0.015
+    - task: mmlu
+      metric: acc
+      value: 0.5472
+      tol: 0.015
+    - task: wikitext
+      metric: word_perplexity
+      value: 34.1783
+      rel_tol: 0.02
+- id: srspd_f600_wikitext
+  method: srspd
+  label: SRSPD f600 (300+300 forget documents), WikiText-2 test retained set, grams solve
+  config:
+    name: zephyr_wmdp_srspd_f600_wikitext
+    model: HuggingFaceH4/zephyr-7b-beta
+    dtype: bfloat16
+    device_map: auto
+    seed: 42
+    data:
+      target:
+        corpora:
+        - bio-forget-corpus
+        - cyber-forget-corpus
+        max_rows: 300
+        min_len: 50
+        max_length: 768
+        heldout_rows: 8
+      heldout_retain_corpora:
+      - wikitext
+      retain_max_length: 512
+      heldout_mix_tokens: 2048
+      retained:
+        buckets:
+        - name: wikitext
+          dataset: Salesforce/wikitext
+          config: wikitext-2-raw-v1
+          split: test
+          revision: b08601e04326c79dfdd32d625aee71d232d685c3
+          text_field: text
+          tokens: 316761
+          min_chars: 51
+        chunk_tokens: 1024
+        seed: 20260812
+        add_bos: true
+        chat_template: null
+    srspd:
+      solver: grams
+      ridge_rel: 1.0e-10
+      gram_budget_gib: 24.0
+      resume_from_cache: true
+      eig_extremes: true
+      lam_svd_dtype: float32
+      scratch_dir: null
+  exports:
+  - id: srspd_f600_wikitext_mpt0.003
+    mu_per_token: 0.003
+    weights:
+      repo: thate10/rspd-wmdp-srspd-zephyr-7b-f600-wikitext-mpt0.003
+      subfolder: null
+      private: true
+    published:
+    - task: wmdp_bio
+      metric: acc
+      value: 0.3511
+      tol: 0.015
+    - task: wmdp_cyber
+      metric: acc
+      value: 0.2677
+      tol: 0.015
+    - task: mmlu
+      metric: acc
+      value: 0.4182
+      tol: 0.015
+  - id: srspd_f600_wikitext_mpt0.01
+    mu_per_token: 0.01
+    weights:
+      repo: thate10/rspd-wmdp-srspd-zephyr-7b-f600-wikitext-mpt0.01
+      subfolder: null
+      private: true
+    published:
+    - task: wmdp_bio
+      metric: acc
+      value: 0.2522
+      tol: 0.015
+    - task: wmdp_cyber
+      metric: acc
+      value: 0.2547
+      tol: 0.015
+    - task: mmlu
+      metric: acc
+      value: 0.2371
+      tol: 0.015
+  - id: srspd_f600_wikitext_mpt0.03
+    mu_per_token: 0.03
+    weights:
+      repo: thate10/rspd-wmdp-srspd-zephyr-7b-f600-wikitext-mpt0.03
+      subfolder: null
+      private: true
+    published:
+    - task: wmdp_bio
+      metric: acc
+      value: 0.2317
+      tol: 0.015
+    - task: wmdp_cyber
+      metric: acc
+      value: 0.2481
+      tol: 0.015
+    - task: mmlu
+      metric: acc
+      value: 0.2376
+      tol: 0.015
+- id: srspd_f600_mix1m
+  method: srspd
+  label: SRSPD f600, retained set A = the 1M multi-source mix, grams solve
+  config:
+    name: zephyr_wmdp_srspd_f600_mix1m
+    model: HuggingFaceH4/zephyr-7b-beta
+    dtype: bfloat16
+    device_map: auto
+    seed: 42
+    data:
+      target:
+        corpora:
+        - bio-forget-corpus
+        - cyber-forget-corpus
+        max_rows: 300
+        min_len: 50
+        max_length: 768
+        heldout_rows: 8
+      heldout_retain_corpora:
+      - wikitext
+      retain_max_length: 512
+      heldout_mix_tokens: 2048
+      retained:
+        buckets:
+        - name: en_prose
+          dataset: HuggingFaceFW/fineweb-edu
+          config: sample-10BT
+          split: train
+          revision: 87f09149ef4734204d70ed1d046ddc9ca3f2b8f9
+          text_field: text
+          tokens: 200000
+          min_chars: 512
+        - name: de_web
+          dataset: HuggingFaceFW/fineweb-2
+          config: deu_Latn
+          split: train
+          revision: af9c13333eb981300149d5ca60a8e9d659b276b9
+          text_field: text
+          tokens: 400000
+          min_chars: 512
+        - name: code
+          dataset: codeparrot/codeparrot-clean-valid
+          config: default
+          split: train
+          revision: 4db92d2ec0c1b4c41eeb439cfae16854511d9dcd
+          text_field: content
+          tokens: 200000
+          min_chars: 256
+        - name: de_wiki
+          dataset: wikimedia/wikipedia
+          config: 20231101.de
+          split: train
+          revision: b04c8d1ceb2f5cd4588862100d08de323dccfbaa
+          text_field: text
+          tokens: 200000
+          min_chars: 512
+        chunk_tokens: 1024
+        seed: 20260812
+        add_bos: true
+        chat_template: null
+    srspd:
+      solver: grams
+      ridge_rel: 1.0e-10
+      gram_budget_gib: 24.0
+      resume_from_cache: true
+      eig_extremes: true
+      lam_svd_dtype: float32
+      scratch_dir: null
+  exports:
+  - id: srspd_f600_mix1m_mpt0.001
+    mu_per_token: 0.001
+    weights:
+      repo: thate10/rspd-wmdp-srspd-zephyr-7b-f600-mix1m-mpt0.001
+      subfolder: null
+      private: true
+    published:
+    - task: wmdp_bio
+      metric: acc
+      value: 0.6339
+      tol: 0.015
+    - task: wmdp_cyber
+      metric: acc
+      value: 0.4323
+      tol: 0.015
+    - task: mmlu
+      metric: acc
+      value: 0.5857
+      tol: 0.015
+    - task: wikitext
+      metric: word_perplexity
+      value: 29.7282
+      rel_tol: 0.02
+  - id: srspd_f600_mix1m_mpt0.003
+    mu_per_token: 0.003
+    weights:
+      repo: thate10/rspd-wmdp-srspd-zephyr-7b-f600-mix1m-mpt0.003
+      subfolder: null
+      private: true
+    published:
+    - task: wmdp_bio
+      metric: acc
+      value: 0.5876
+      tol: 0.015
+    - task: wmdp_cyber
+      metric: acc
+      value: 0.4137
+      tol: 0.015
+    - task: mmlu
+      metric: acc
+      value: 0.5822
+      tol: 0.015
+    - task: wikitext
+      metric: word_perplexity
+      value: 10.2415
+      rel_tol: 0.02
+  - id: srspd_f600_mix1m_mpt0.01
+    mu_per_token: 0.01
+    weights:
+      repo: thate10/rspd-wmdp-srspd-zephyr-7b-f600-mix1m-mpt0.01
+      subfolder: null
+      private: true
+    published:
+    - task: wmdp_bio
+      metric: acc
+      value: 0.3064
+      tol: 0.015
+    - task: wmdp_cyber
+      metric: acc
+      value: 0.2823
+      tol: 0.015
+    - task: mmlu
+      metric: acc
+      value: 0.438
+      tol: 0.015
+    - task: wikitext
+      metric: word_perplexity
+      value: 26.4773
+      rel_tol: 0.02
+  - id: srspd_f600_mix1m_mpt0.03
+    mu_per_token: 0.03
+    weights:
+      repo: thate10/rspd-wmdp-srspd-zephyr-7b-f600-mix1m-mpt0.03
+      subfolder: null
+      private: true
+    published:
+    - task: wmdp_bio
+      metric: acc
+      value: 0.2506
+      tol: 0.015
+    - task: wmdp_cyber
+      metric: acc
+      value: 0.2647
+      tol: 0.015
+    - task: mmlu
+      metric: acc
+      value: 0.2316
+      tol: 0.015
+    - task: wikitext
+      metric: word_perplexity
+      value: 82.3938
+      rel_tol: 0.02
+  - id: srspd_f600_mix1m_mpt0.1
+    mu_per_token: 0.1
+    weights:
+      repo: thate10/rspd-wmdp-srspd-zephyr-7b-f600-mix1m-mpt0.1
+      subfolder: null
+      private: true
+    published:
+    - task: wmdp_bio
+      metric: acc
+      value: 0.2467
+      tol: 0.015
+    - task: wmdp_cyber
+      metric: acc
+      value: 0.2481
+      tol: 0.015
+    - task: mmlu
+      metric: acc
+      value: 0.247
+      tol: 0.015
+    - task: wikitext
+      metric: word_perplexity
+      value: 3102.6779
+      rel_tol: 0.02
+- id: srspd_f600_wikitext_mcq_dedup
+  method: srspd
+  label: SRSPD f600, retained set B = WikiText-2 test + MMLU-validation MCQ (test duplicates excluded)
+    + UltraChat, grams solve
+  config:
+    name: zephyr_wmdp_srspd_f600_wikitext_mcq_dedup
+    model: HuggingFaceH4/zephyr-7b-beta
+    dtype: bfloat16
+    device_map: auto
+    seed: 42
+    data:
+      target:
+        corpora:
+        - bio-forget-corpus
+        - cyber-forget-corpus
+        max_rows: 300
+        min_len: 50
+        max_length: 768
+        heldout_rows: 8
+      heldout_retain_corpora:
+      - wikitext
+      retain_max_length: 512
+      heldout_mix_tokens: 2048
+      retained:
+        buckets:
+        - name: wikitext
+          dataset: Salesforce/wikitext
+          config: wikitext-2-raw-v1
+          split: test
+          revision: b08601e04326c79dfdd32d625aee71d232d685c3
+          text_field: text
+          tokens: 316761
+          min_chars: 51
+        - name: mcq
+          dataset: lighteval/mmlu
+          config: all
+          split: validation
+          revision: 31d46ab06e6934bb0d95f6918668716d1db6f921
+          text_field: question
+          format: mmlu_lm_eval
+          exclude_question_sha256:
+          - 003cdfb5a1776cdbdc5429093f021238eed7cc310d2ce7f8db53ccddc2e96289
+          - 058531224da728d4154635834b9876cd3a4cef186580d54ad9958fbbb6ae294e
+          - 0a5d3da68db95440520b4077451af78ffc1b3b3453b03e2bb22cea7130b9241b
+          - 115a00bb95516923f4b9fa3df21873fed5ebe8b3977e7de77e613cfb8a938ba1
+          - 1cd7160ab05db7634d594bb3d943b559436306598db1d7091a7e1f164c40b421
+          - 1f12e66226fcb030f821cec9897a2971cbb840c1d2dd173c80639af6377a2456
+          - 25e3d260149958069f9348054a32dcd81cad11d769cd3c15247bffd669529297
+          - 2cb269431655b8a65a609d21aaa3846697b208ed6ded67052f40eab1c47a719c
+          - 2ed6738ff0b97831571de46aa19855a33fb1a7aca34b3f340041f323d7edd811
+          - 31e49f90ad683322d1bc3bc343e3b8c41ffc615ebcaa32d28710870f3a2a8d5f
+          - 43b521203b7e41a0938ada041774e7773425ee99978212dd7a96da50d1f91bed
+          - 43f82a44cc5262286141fcb356ea2d3e889e36f86a40d96a7a7bf97e5564a13f
+          - 55d8db3cbddc62671f839cf6b8a3c09085a07d737ba50ffec3b86dafe6eab1ad
+          - 6404e7ffd585c0e2ae5cac4580b583a2ac982abb9ce5b9ec3ea3375e36394985
+          - 86e79c333ec0759cb8363dfcc492d3a11e7a3a19450cba529b5f9765c88c7a22
+          - 88112cf7a8f3401c503187ee764278ad717d55da05adadeaa538ddfbb814aa6d
+          - 8867d82eedeccf306feafccaae90a954f6adda18e0fdc76a24ae5dedd7b46184
+          - 8ad877c6e75b434ad2764dc4b3b2e63c286efcd8dedf8da116dffb4d64f3616a
+          - 90b29e172abb6d9461abf49941153316ce9134440ba409cc901df6e0fd746caa
+          - 91862a3e1c44efa9ae8b98eecede258baef6a56b9fd3da071a837778f4a7a59e
+          - 99d8497cf32e645507bc2c37e763deec74fecd79ab8b4d9734ceeb9be31d8b0b
+          - a5aed73bcc6efa34b0d179aafe321aca8fd6728b41f3a0cba01d1c8dc6012450
+          - a8751833b755ef74fa099345d3a5bd52d9c1e791e7d655373a735a7bb3fcf84e
+          - b0b2f4d73afc73ae6b3f691e079d16b75609881198c1952de67957fcc5f95f78
+          - b8fa4a87bb9b94ea755e1856265954466963f898a34aa5dcf110ee652f5f7bce
+          - c0f6d97f4db43793a24ace17b9a450d81ef16093c57125c8213c6d58959207ad
+          - c22b2194533b4ea9dd590f58d737297da9221b0feb354ee412102f3de0d1530b
+          - ce371be1daae028c7443fc1c215c02f58d783dffe0494f0c33c18cda759588da
+          - d9ed33125aa65243eeb2ead5e901cae8c1039b653e695b4448bd96c3360b9ffb
+          - df8ebb85fe1f266e5944f9b95d42b0471be9566fc7cb96196161e58697292b48
+          - e318fc7e81bd3316d2ec9bccd13902614b0493802d4bd9262db62bdfb68896a3
+          - e40253f50db3155f746325c04a44c289cd93994fce945bb68502b5a539a0164b
+          - e4a007f269a9dea8a410399b759a02399e0058f7f1e01c6062ee08adbaf9503e
+          - f1707aca07762c188aea762efd91b86949e1bf41ac775b10e4dfa8091e29bff5
+          - f635d9cad9bdcbf9bbe0579c61a6bcb3c09e5b252e16d75e70318e0fa8885b38
+          - f6a4ca1bf77330c981872dcdb3441c61d537ab47c983f9208fee323253b98fe9
+          - f81a1e79f705ea7892fda4680adc516cbe24fd7ddf05f340752175e102ae122f
+          - ff82d08d9d61e24593dfde0cc6403f01ca95db9ef5fde80791de36c5d36f2520
+          tokens: 150000
+          min_chars: 0
+        - name: chat
+          dataset: HuggingFaceH4/ultrachat_200k
+          config: default
+          split: test_sft
+          revision: 8049631c405ae6576f93f445c6b8166f76f5505a
+          text_field: messages
+          format: chat_messages
+          tokens: 150000
+          min_chars: 0
+        chunk_tokens: 1024
+        seed: 20260812
+        add_bos: true
+        chat_template: null
+    srspd:
+      solver: grams
+      ridge_rel: 1.0e-10
+      gram_budget_gib: 24.0
+      resume_from_cache: true
+      eig_extremes: true
+      lam_svd_dtype: float32
+      scratch_dir: null
+  exports:
+  - id: srspd_f600_wikitext_mcq_dedup_mpt0.001
+    mu_per_token: 0.001
+    weights:
+      repo: thate10/rspd-wmdp-srspd-zephyr-7b-f600-wikitext-mcq-dedup-mpt0.001
+      subfolder: null
+      private: true
+    published:
+    - task: wmdp_bio
+      metric: acc
+      value: 0.6394
+      tol: 0.015
+    - task: wmdp_cyber
+      metric: acc
+      value: 0.4358
+      tol: 0.015
+    - task: mmlu
+      metric: acc
+      value: 0.5852
+      tol: 0.015
+    - task: wikitext
+      metric: word_perplexity
+      value: 9.7013
+      rel_tol: 0.02
+  - id: srspd_f600_wikitext_mcq_dedup_mpt0.003
+    mu_per_token: 0.003
+    weights:
+      repo: thate10/rspd-wmdp-srspd-zephyr-7b-f600-wikitext-mcq-dedup-mpt0.003
+      subfolder: null
+      private: true
+    published:
+    - task: wmdp_bio
+      metric: acc
+      value: 0.5687
+      tol: 0.015
+    - task: wmdp_cyber
+      metric: acc
+      value: 0.3805
+      tol: 0.015
+    - task: mmlu
+      metric: acc
+      value: 0.5443
+      tol: 0.015
+    - task: wikitext
+      metric: word_perplexity
+      value: 10.2859
+      rel_tol: 0.02
+  - id: srspd_f600_wikitext_mcq_dedup_mpt0.01
+    mu_per_token: 0.01
+    weights:
+      repo: thate10/rspd-wmdp-srspd-zephyr-7b-f600-wikitext-mcq-dedup-mpt0.01
+      subfolder: null
+      private: true
+    published:
+    - task: wmdp_bio
+      metric: acc
+      value: 0.4077
+      tol: 0.015
+    - task: wmdp_cyber
+      metric: acc
+      value: 0.2924
+      tol: 0.015
+    - task: mmlu
+      metric: acc
+      value: 0.5056
+      tol: 0.015
+    - task: wikitext
+      metric: word_perplexity
+      value: 12.1537
+      rel_tol: 0.02
+  - id: srspd_f600_wikitext_mcq_dedup_mpt0.03
+    mu_per_token: 0.03
+    weights:
+      repo: thate10/rspd-wmdp-srspd-zephyr-7b-f600-wikitext-mcq-dedup-mpt0.03
+      subfolder: null
+      private: true
+    published:
+    - task: wmdp_bio
+      metric: acc
+      value: 0.2396
+      tol: 0.015
+    - task: wmdp_cyber
+      metric: acc
+      value: 0.2637
+      tol: 0.015
+    - task: mmlu
+      metric: acc
+      value: 0.2562
+      tol: 0.015
+    - task: wikitext
+      metric: word_perplexity
+      value: 39.1787
+      rel_tol: 0.02
+  - id: srspd_f600_wikitext_mcq_dedup_mpt0.1
+    mu_per_token: 0.1
+    weights:
+      repo: thate10/rspd-wmdp-srspd-zephyr-7b-f600-wikitext-mcq-dedup-mpt0.1
+      subfolder: null
+      private: true
+    published:
+    - task: wmdp_bio
+      metric: acc
+      value: 0.2482
+      tol: 0.015
+    - task: wmdp_cyber
+      metric: acc
+      value: 0.2617
+      tol: 0.015
+    - task: mmlu
+      metric: acc
+      value: 0.2414
+      tol: 0.015
+    - task: wikitext
+      metric: word_perplexity
+      value: 281.8751
+      rel_tol: 0.02
+- id: srspd_f16_lamsweep_mpt0.003
+  method: srspd
+  label: SRSPD rank-truncation sweep, 16 forget documents, 1M-mix retained set, μ/tok 0.003
+  config:
+    name: zephyr_wmdp_srspd_f16_lamsweep_mpt0.003
+    model: HuggingFaceH4/zephyr-7b-beta
+    dtype: bfloat16
+    device_map: auto
+    seed: 42
+    data:
+      target:
+        corpora:
+        - bio-forget-corpus
+        - cyber-forget-corpus
+        max_rows: 8
+        min_len: 50
+        max_length: 768
+        heldout_rows: 8
+      heldout_retain_corpora:
+      - wikitext
+      retain_max_length: 512
+      heldout_mix_tokens: 2048
+      retained:
+        buckets:
+        - name: en_prose
+          dataset: HuggingFaceFW/fineweb-edu
+          config: sample-10BT
+          split: train
+          revision: 87f09149ef4734204d70ed1d046ddc9ca3f2b8f9
+          text_field: text
+          tokens: 200000
+          min_chars: 512
+        - name: de_web
+          dataset: HuggingFaceFW/fineweb-2
+          config: deu_Latn
+          split: train
+          revision: af9c13333eb981300149d5ca60a8e9d659b276b9
+          text_field: text
+          tokens: 400000
+          min_chars: 512
+        - name: code
+          dataset: codeparrot/codeparrot-clean-valid
+          config: default
+          split: train
+          revision: 4db92d2ec0c1b4c41eeb439cfae16854511d9dcd
+          text_field: content
+          tokens: 200000
+          min_chars: 256
+        - name: de_wiki
+          dataset: wikimedia/wikipedia
+          config: 20231101.de
+          split: train
+          revision: b04c8d1ceb2f5cd4588862100d08de323dccfbaa
+          text_field: text
+          tokens: 200000
+          min_chars: 512
+        chunk_tokens: 1024
+        seed: 20260812
+        add_bos: true
+        chat_template: null
+    srspd:
+      solver: readout
+      ridge_rel: 1.0e-10
+      gram_budget_gib: 24.0
+      resume_from_cache: true
+      eig_extremes: true
+      lam_svd_dtype: float32
+      scratch_dir: null
+  exports:
+  - id: srspd_f16_mpt0.003
+    mu_per_token: 0.003
+    rank_rule: null
+    weights: null
+    published:
+    - task: wmdp_bio
+      metric: acc
+      value: 0.5844
+      tol: 0.015
+    - task: wmdp_cyber
+      metric: acc
+      value: 0.4182
+      tol: 0.015
+    - task: mmlu
+      metric: acc
+      value: 0.5768
+      tol: 0.015
+    - task: wikitext
+      metric: word_perplexity
+      value: 10.4889
+      rel_tol: 0.02
+  - id: srspd_f16_mpt0.003_lam0.001
+    mu_per_token: 0.003
+    rank_rule: 0.001
+    weights: null
+    published:
+    - task: wmdp_bio
+      metric: acc
+      value: 0.5821
+      tol: 0.015
+    - task: wmdp_cyber
+      metric: acc
+      value: 0.4167
+      tol: 0.015
+    - task: mmlu
+      metric: acc
+      value: 0.5764
+      tol: 0.015
+    - task: wikitext
+      metric: word_perplexity
+      value: 12.5506
+      rel_tol: 0.02
+  - id: srspd_f16_mpt0.003_lam0.01
+    mu_per_token: 0.003
+    rank_rule: 0.01
+    weights: null
+    published:
+    - task: wmdp_bio
+      metric: acc
+      value: 0.5695
+      tol: 0.015
+    - task: wmdp_cyber
+      metric: acc
+      value: 0.4207
+      tol: 0.015
+    - task: mmlu
+      metric: acc
+      value: 0.5782
+      tol: 0.015
+    - task: wikitext
+      metric: word_perplexity
+      value: 11.2186
+      rel_tol: 0.02
+  - id: srspd_f16_mpt0.003_lam0.1
+    mu_per_token: 0.003
+    rank_rule: 0.1
+    weights: null
+    published:
+    - task: wmdp_bio
+      metric: acc
+      value: 0.5876
+      tol: 0.015
+    - task: wmdp_cyber
+      metric: acc
+      value: 0.4167
+      tol: 0.015
+    - task: mmlu
+      metric: acc
+      value: 0.5684
+      tol: 0.015
+    - task: wikitext
+      metric: word_perplexity
+      value: 97.6175
+      rel_tol: 0.02
+- id: srspd_f16_lamsweep_mpt0.01
+  method: srspd
+  label: SRSPD rank-truncation sweep, 16 forget documents, 1M-mix retained set, μ/tok 0.01
+  config:
+    name: zephyr_wmdp_srspd_f16_lamsweep_mpt0.01
+    model: HuggingFaceH4/zephyr-7b-beta
+    dtype: bfloat16
+    device_map: auto
+    seed: 42
+    data:
+      target:
+        corpora:
+        - bio-forget-corpus
+        - cyber-forget-corpus
+        max_rows: 8
+        min_len: 50
+        max_length: 768
+        heldout_rows: 8
+      heldout_retain_corpora:
+      - wikitext
+      retain_max_length: 512
+      heldout_mix_tokens: 2048
+      retained:
+        buckets:
+        - name: en_prose
+          dataset: HuggingFaceFW/fineweb-edu
+          config: sample-10BT
+          split: train
+          revision: 87f09149ef4734204d70ed1d046ddc9ca3f2b8f9
+          text_field: text
+          tokens: 200000
+          min_chars: 512
+        - name: de_web
+          dataset: HuggingFaceFW/fineweb-2
+          config: deu_Latn
+          split: train
+          revision: af9c13333eb981300149d5ca60a8e9d659b276b9
+          text_field: text
+          tokens: 400000
+          min_chars: 512
+        - name: code
+          dataset: codeparrot/codeparrot-clean-valid
+          config: default
+          split: train
+          revision: 4db92d2ec0c1b4c41eeb439cfae16854511d9dcd
+          text_field: content
+          tokens: 200000
+          min_chars: 256
+        - name: de_wiki
+          dataset: wikimedia/wikipedia
+          config: 20231101.de
+          split: train
+          revision: b04c8d1ceb2f5cd4588862100d08de323dccfbaa
+          text_field: text
+          tokens: 200000
+          min_chars: 512
+        chunk_tokens: 1024
+        seed: 20260812
+        add_bos: true
+        chat_template: null
+    srspd:
+      solver: readout
+      ridge_rel: 1.0e-10
+      gram_budget_gib: 24.0
+      resume_from_cache: true
+      eig_extremes: true
+      lam_svd_dtype: float32
+      scratch_dir: null
+  exports:
+  - id: srspd_f16_mpt0.01
+    mu_per_token: 0.01
+    rank_rule: null
+    weights: null
+    published:
+    - task: wmdp_bio
+      metric: acc
+      value: 0.3362
+      tol: 0.015
+    - task: wmdp_cyber
+      metric: acc
+      value: 0.2723
+      tol: 0.015
+    - task: mmlu
+      metric: acc
+      value: 0.4494
+      tol: 0.015
+    - task: wikitext
+      metric: word_perplexity
+      value: 33.8593
+      rel_tol: 0.02
+  - id: srspd_f16_mpt0.01_lam0.001
+    mu_per_token: 0.01
+    rank_rule: 0.001
+    weights: null
+    published:
+    - task: wmdp_bio
+      metric: acc
+      value: 0.3614
+      tol: 0.015
+    - task: wmdp_cyber
+      metric: acc
+      value: 0.2828
+      tol: 0.015
+    - task: mmlu
+      metric: acc
+      value: 0.4607
+      tol: 0.015
+    - task: wikitext
+      metric: word_perplexity
+      value: 35.7778
+      rel_tol: 0.02
+  - id: srspd_f16_mpt0.01_lam0.01
+    mu_per_token: 0.01
+    rank_rule: 0.01
+    weights: null
+    published:
+    - task: wmdp_bio
+      metric: acc
+      value: 0.3684
+      tol: 0.015
+    - task: wmdp_cyber
+      metric: acc
+      value: 0.3015
+      tol: 0.015
+    - task: mmlu
+      metric: acc
+      value: 0.4763
+      tol: 0.015
+    - task: wikitext
+      metric: word_perplexity
+      value: 16.8019
+      rel_tol: 0.02
+  - id: srspd_f16_mpt0.01_lam0.1
+    mu_per_token: 0.01
+    rank_rule: 0.1
+    weights: null
+    published:
+    - task: wmdp_bio
+      metric: acc
+      value: 0.3614
+      tol: 0.015
+    - task: wmdp_cyber
+      metric: acc
+      value: 0.2894
+      tol: 0.015
+    - task: mmlu
+      metric: acc
+      value: 0.4054
+      tol: 0.015
+    - task: wikitext
+      metric: word_perplexity
+      value: 14.4224
+      rel_tol: 0.02
+- id: srspd_f16_lamsweep_mpt0.03
+  method: srspd
+  label: SRSPD rank-truncation sweep, 16 forget documents, 1M-mix retained set, μ/tok 0.03
+  config:
+    name: zephyr_wmdp_srspd_f16_lamsweep_mpt0.03
+    model: HuggingFaceH4/zephyr-7b-beta
+    dtype: bfloat16
+    device_map: auto
+    seed: 42
+    data:
+      target:
+        corpora:
+        - bio-forget-corpus
+        - cyber-forget-corpus
+        max_rows: 8
+        min_len: 50
+        max_length: 768
+        heldout_rows: 8
+      heldout_retain_corpora:
+      - wikitext
+      retain_max_length: 512
+      heldout_mix_tokens: 2048
+      retained:
+        buckets:
+        - name: en_prose
+          dataset: HuggingFaceFW/fineweb-edu
+          config: sample-10BT
+          split: train
+          revision: 87f09149ef4734204d70ed1d046ddc9ca3f2b8f9
+          text_field: text
+          tokens: 200000
+          min_chars: 512
+        - name: de_web
+          dataset: HuggingFaceFW/fineweb-2
+          config: deu_Latn
+          split: train
+          revision: af9c13333eb981300149d5ca60a8e9d659b276b9
+          text_field: text
+          tokens: 400000
+          min_chars: 512
+        - name: code
+          dataset: codeparrot/codeparrot-clean-valid
+          config: default
+          split: train
+          revision: 4db92d2ec0c1b4c41eeb439cfae16854511d9dcd
+          text_field: content
+          tokens: 200000
+          min_chars: 256
+        - name: de_wiki
+          dataset: wikimedia/wikipedia
+          config: 20231101.de
+          split: train
+          revision: b04c8d1ceb2f5cd4588862100d08de323dccfbaa
+          text_field: text
+          tokens: 200000
+          min_chars: 512
+        chunk_tokens: 1024
+        seed: 20260812
+        add_bos: true
+        chat_template: null
+    srspd:
+      solver: readout
+      ridge_rel: 1.0e-10
+      gram_budget_gib: 24.0
+      resume_from_cache: true
+      eig_extremes: true
+      lam_svd_dtype: float32
+      scratch_dir: null
+  exports:
+  - id: srspd_f16_mpt0.03
+    mu_per_token: 0.03
+    rank_rule: null
+    weights: null
+    published:
+    - task: wmdp_bio
+      metric: acc
+      value: 0.2506
+      tol: 0.015
+    - task: wmdp_cyber
+      metric: acc
+      value: 0.2632
+      tol: 0.015
+    - task: mmlu
+      metric: acc
+      value: 0.2407
+      tol: 0.015
+    - task: wikitext
+      metric: word_perplexity
+      value: 90.9598
+      rel_tol: 0.02
+  - id: srspd_f16_mpt0.03_lam0.001
+    mu_per_token: 0.03
+    rank_rule: 0.001
+    weights: null
+    published:
+    - task: wmdp_bio
+      metric: acc
+      value: 0.2561
+      tol: 0.015
+    - task: wmdp_cyber
+      metric: acc
+      value: 0.2607
+      tol: 0.015
+    - task: mmlu
+      metric: acc
+      value: 0.2434
+      tol: 0.015
+    - task: wikitext
+      metric: word_perplexity
+      value: 52.3911
+      rel_tol: 0.02
+  - id: srspd_f16_mpt0.03_lam0.01
+    mu_per_token: 0.03
+    rank_rule: 0.01
+    weights: null
+    published:
+    - task: wmdp_bio
+      metric: acc
+      value: 0.249
+      tol: 0.015
+    - task: wmdp_cyber
+      metric: acc
+      value: 0.2723
+      tol: 0.015
+    - task: mmlu
+      metric: acc
+      value: 0.2514
+      tol: 0.015
+    - task: wikitext
+      metric: word_perplexity
+      value: 62.0601
+      rel_tol: 0.02
+  - id: srspd_f16_mpt0.03_lam0.1
+    mu_per_token: 0.03
+    rank_rule: 0.1
+    weights: null
+    published:
+    - task: wmdp_bio
+      metric: acc
+      value: 0.2569
+      tol: 0.015
+    - task: wmdp_cyber
+      metric: acc
+      value: 0.2622
+      tol: 0.015
+    - task: mmlu
+      metric: acc
+      value: 0.2378
+      tol: 0.015
+    - task: wikitext
+      metric: word_perplexity
+      value: 56.943
+      rel_tol: 0.02
