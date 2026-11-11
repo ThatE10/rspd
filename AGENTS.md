@@ -165,7 +165,21 @@ Use the specificity spectrum `γ`:
   the target is not separable there at any moderate dose.
 * `srspd.suggest_mu_per_token(spectrum, fractions, quantiles)` returns the dose that erases
   the `q`-quantile direction by fraction `f`, for every `(q, f)`, plus a sorted grid. It
-  needs the **full** spectrum, which `erase` does not return; get it for one matrix like this:
+  needs the **full** spectrum: pass `spectrum="full"` to `erase` (readout solver) and hand
+  it `report.specificity[key]["specificity"]` or `report.spectrum(key_or_matrix)`. A
+  solve-only run (`apply=False`) at any dose gives you the spectrum; it does not depend on
+  the dose:
+
+```python runnable
+probe = srspd.erase(model, target=target, retained=retained, layers=layers,
+                    mu_per_token=1.0, apply=False, spectrum="full")
+grid = srspd.suggest_mu_per_token(probe.spectrum("L01.mlp.c_fc"),
+                                  fractions=(0.5, 0.9), quantiles=(0.5, 0.9))
+print(grid["mu_per_token"])                             # pass this grid to erase
+probe.close()
+```
+
+Without a report, for one matrix from raw activations:
 
 ```python runnable
 import torch
@@ -237,8 +251,10 @@ srspd report report.json --top 5
 the model's tokenizer and cut to `--max-length` (default 512) tokens. `--dtype` defaults to
 `bfloat16`, `--device` to `cpu`. `--out` writes the edited checkpoint and the tokenizer;
 `--report` writes the report JSON. Repeat `--rank-rule` for several rules and pick one with
-`--apply-rank-rule` (`full` = full rank). The CLI always applies one setting, so a list of
-doses needs `--apply-mu-per-token`.
+`--apply-rank-rule` (`full` = full rank). A list of doses (or rules) needs
+`--apply-mu-per-token` (`--apply-rank-rule`), or `--no-apply` for a solve-only run that
+applies nothing and writes only the report (no `--out`). `--spectrum full` keeps the whole
+`γ` spectrum per input key in the report.
 
 ### 5. Read the report
 
@@ -268,7 +284,7 @@ assert json.load(open(path))["dose"]["mu_per_token"] == 1.0
 | `settings` | every solved `(mu_per_token, rank_rule)` pair, the valid arguments of `apply_dose` |
 | `ridge_rel` | the requested relative ridge |
 | `n_x`, `n_y` | target / retained token counts |
-| `matrices` | per edited matrix, at the applied setting (row fields below) |
+| `matrices` | per edited matrix, at the applied setting (row fields below), in block order, then forward order within a block |
 | `leaks_by_type` | `{type: {"n", "L_X_rel": {median,min,max}, "L_Y_rel": {...}}}` at the applied setting |
 | `by_dose` | `{repr(mu_per_token): {"dose", "leaks": {matrix: {L_X_rel, L_Y_rel}}, "leaks_by_type", "truncated": {str(rule): {"leaks", "leaks_by_type", "rank_by_type"}}}}` for every solved setting |
 | `edit` | the applied edit: `survival`, `rel_err`, `delta_fro_sum` (Σ‖M‖_F), `by_type` (survival per type) |
@@ -276,9 +292,13 @@ assert json.load(open(path))["dose"]["mu_per_token"] == 1.0
 | `quirks` | model properties that changed handling (Conv1D layout, biased projections, multimodal towers, KV-shared layers, shared inputs, bf16 edits) |
 | `selector` | the resolved layer selector |
 | `pass_plan` | the Gram passes: `[{keys, gram_bytes, deepest_layer}]` |
-| `specificity` | per input key: token counts, `d_in`, `lam_min`/`lam_max`/`lam_ratio` of `G_Y` (conditioning), `specificity` (`γ`: `top`, `median`, `n_above`, `n`; readout only), `solve_path` and `ridge_delta` per dose index |
+| `specificity` | per input key: token counts, `d_in`, `lam_min`/`lam_max`/`lam_ratio` of `G_Y` (conditioning), `specificity` (`γ`: `top`, `median`, `n_above`, `n`, and with `spectrum="full"` the whole `spectrum`; readout only), `solve_path` and `ridge_delta` per dose index |
 | `stats` | per-pass timings, `gram_budget_bytes`, sequence counts, `scratch_dir` |
-| `warnings` | strings: non-PD solves, disabled resume, non-finite leaks |
+| `warnings` | strings: one summary of every non-PD solve (counts by solver path), disabled resume, non-finite leaks |
+| `non_pd` | per non-PD solve: `{matrix, input_key, mu_per_token, solve_path, ridge_delta, requested_ridge_delta}` |
+
+`report.spectrum(name)` returns the full `γ` spectrum of an input key or edited matrix
+(needs `spectrum="full"`).
 
 Per-matrix row (`report.matrices[name]`):
 
@@ -286,7 +306,8 @@ Per-matrix row (`report.matrices[name]`):
 | --- | --- |
 | `L_X_rel` | `‖(W − M) Xᵀ‖ / ‖W Xᵀ‖`: target response that **survives** (0 = fully erased, 1 = untouched) |
 | `L_Y_rel` | `‖M Yᵀ‖ / ‖W Yᵀ‖`: retained response **disturbed** (0 = untouched) |
-| `erased_rel`, `retained_rel` | `L_X_rel²`, `L_Y_rel²` (energy fractions; `erased_rel` is the target energy *left*, despite its name) |
+| `target_surviving_rel`, `retained_disturbed_rel` | `L_X_rel²` (target energy left), `L_Y_rel²` (retained energy disturbed) |
+| `erased_rel`, `retained_rel` | **deprecated** aliases of `target_surviving_rel` / `retained_disturbed_rel` (same values; `erased_rel` is the target energy *left*, despite its name) |
 | `delta_fro`, `w_fro` | `‖M‖_F`, `‖W‖_F` |
 | `edit_fro`, `survival` | `‖W_new − W‖_F` as written, and `edit_fro / ‖M‖_F` (below 1 when the weight dtype rounded part of the edit away) |
 | `rank`, `rank_bound` | kept rank of `M_r` (`None` = full rank) and its ceiling (`min(d_out, d_in, n_x)` at full rank, the spectrum length when truncated) |
@@ -316,14 +337,14 @@ names = srspd.restore(model)           # bit for bit; returns the restored matri
 assert names and not report.applied
 report.apply_dose(1.0)                 # any solved (dose, rule) again, no new pass over the data
 
-from srspd.models.export import export_checkpoint
-out = export_checkpoint(model, tokenizer, tempfile.mkdtemp())   # save_pretrained of the edited model
+out = srspd.export_checkpoint(model, tokenizer, tempfile.mkdtemp())   # save_pretrained of the edited model
 print(out["dir"], out["dtype"], out["tokenizer_saved"], out["warnings"])
 report.close()                         # restores the model and frees the solve
 assert not report.applied
 ```
 
-`export_checkpoint(model, tokenizer, out_dir, source=None)` writes the model as it is now
+`srspd.export_checkpoint(model, tokenizer, out_dir, source=None)` (also
+`srspd.models.export_checkpoint`) writes the model as it is now
 (edited) in its own dtype, the tokenizer beside it, and for models with KV-shared layers
 backfills the tensors `transformers` does not save, from `source` (default
 `model.config._name_or_path`). Export **before** `close()`: `close()` restores the model.
@@ -354,8 +375,9 @@ M_r = srspd.erased_component(W, X, Y, mu=dose.mu, rank=2)  # COALA truncation of
 | situation | what happens | what to do |
 | --- | --- | --- |
 | something other than an `ErasedComponent` handed to `apply_erasure` / `leaks` / `truncate_component` (a `KeptMap`, a tensor, factors of `W`) | `ErasureConventionError` (a `TypeError`) with the core table | compute `M` with `erased_component*` and subtract it |
-| `erase` on a model that carries an applied erasure | `RuntimeError: this model carries an applied erasure: call srspd.restore(model) first ...` | `srspd.restore(model)` or `report.close()`, then erase |
-| several doses with `apply=True` and no choice | `ValueError: 2 doses solved; pass apply_mu_per_token=<one of [...]> or apply=False ...` | pass `apply_mu_per_token=` or `apply=False` |
+| `erase` on a model that carries an applied erasure | `RuntimeError: this model carries an applied erasure held by EditReport #N (...): call srspd.restore(model) (or that report's close()) first ...` | `srspd.restore(model)` or the holder's `close()`, then erase |
+| `apply_dose` on one report while another report's edit is applied | `RuntimeError: this model carries an applied erasure held by EditReport #N (...), not by this report (EditReport #M ...) ...` | `srspd.restore(model)`, then `apply_dose` |
+| several doses with `apply=True` and no choice | `ValueError: 2 doses solved; pass apply_mu_per_token=<one of [...]> or apply=False ...` (CLI: `pass --apply-mu-per-token <one of [...]> or --no-apply`) | pass `apply_mu_per_token=` or `apply=False` |
 | several rank rules with `apply=True` and no choice | `ValueError: 2 rank rules solved; pass apply_rank_rule=<one of [...], or None for the full-rank edit> ...` | pass `apply_rank_rule=` (`None` = full rank) |
 | `apply_dose` with an unsolved setting | `ValueError: mu_per_token 3.0 was not solved; solved: [...]` | use a value from `report.settings` |
 | `rank_rule` with `solver="grams"` | `ValueError: rank_rule needs solver='readout' ...` | use the readout solver |
@@ -364,16 +386,18 @@ M_r = srspd.erased_component(W, X, Y, mu=dose.mu, rank=2)  # COALA truncation of
 | one input key's Gram exceeds the per-device budget | `ValueError: input 'L..' (d_in N) needs B bytes ... of Gram, more than the ... per-device budget on DEV; no pass can hold it. Raise gram_budget_gib or free device memory.` | raise `gram_budget_gib`, or put the Grams elsewhere with `device=` |
 | Grams exceed the budget in total | not an error: more Gram passes (`report.pass_plan`), each resuming from the cached residual stream | |
 | `scratch_dir` disk too small | `RuntimeError: scratch_dir ... has X GiB free but this erasure spills Y GiB ...` | larger disk, fewer doses, no `rank_rule` |
-| `G_μ` not numerically positive definite (common: LayerNorm outputs are mean-centred, so `Y` spans fewer than `d_in` directions) | not an error: the solve falls back to an `eigh` pseudo-inverse (or, with `ridge_rel > 0`, escalates the ridge ×10 up to `1e-6` first); `solve_path` says which, and a warning `... G_mu is not numerically positive definite at the requested ridge` is added | usually fine; a small `ridge_rel` (e.g. `1e-6`) gives `cholesky_ridge` and makes the dose formula approximate |
+| `G_μ` not numerically positive definite (common: LayerNorm outputs are mean-centred, so `Y` spans fewer than `d_in` directions) | not an error: the solve falls back to an `eigh` pseudo-inverse (or, with `ridge_rel > 0`, escalates the ridge ×10 up to `1e-6` first); `solve_path` says which, every such solve is listed in `report.non_pd`, and ONE summary warning `G_mu is not numerically positive definite at the requested ridge for N matrix solve(s) (eigh: ...) ...` is added per run | usually fine; a small `ridge_rel` (e.g. `1e-6`) gives `cholesky_ridge` and makes the dose formula approximate |
 | a biased `nn.Linear` selected | `ValueError: ... has a bias; the solve assumes a pure matmul ... Pass subtract_bias=True ...` | `subtract_bias=True` (the bias is never edited) |
 | selector matches nothing / a non-linear module | `ValueError: no target projections discovered ...` / `TypeError: ... not nn.Linear/Conv1D` | fix `layers=` against `model.named_modules()` |
 | hooks do not bracket `x Wᵀ` | `AssertionError: bracketing probe violated ...` | model must be in `eval()`; the selector must end at the projection |
 | resumed pass not bitwise equal to a full forward | `ResumeGuardError` | `resume_from_cache=False` |
 | `apply_dose` / `restore` on a closed or JSON-loaded report | `RuntimeError: this EditReport has no live solve attached ...` | re-run `srspd.erase` |
 
-Keep **one live report per model**. Before a new `erase` on the same model, `close()` the
-previous report, and never call `apply_dose` on a report older than the latest `erase` of
-that model: the refusal above checks only the most recent report.
+The edit lock belongs to the **model**: at most one report's edit is applied at a time.
+While one is, every other report's `apply_dose` and every new `erase` on that model refuse
+and name the holder; `srspd.restore(model)` restores the holder's edit bit for bit
+(whichever report applied it) and releases the lock, after which any open report may
+`apply_dose` again. `close()` reports you no longer need: each keeps its solve in memory.
 
 ```python runnable
 try:
@@ -384,7 +408,7 @@ r = srspd.erase(model, target=target, retained=retained, layers=layers, mu_per_t
 try:
     srspd.erase(model, target=target, retained=retained, mu_per_token=1.0)
 except RuntimeError as e:
-    print(e)                                      # this model carries an applied erasure ...
+    print(e)                                      # ... applied erasure held by EditReport #N ...
 try:
     srspd.apply_erasure(W, W_new)                 # a bare tensor is not an ErasedComponent
 except srspd.ErasureConventionError as e:

@@ -56,7 +56,7 @@ from .solve import (ERANK_RULE, ErasedComponent, apply_erasure, erased_component
 __all__ = ["SOLVERS", "CONVENTION", "LEAK_FIELDS", "LAM_SVD_DTYPES", "run_gram_passes",
            "solve_pass", "solve_key_order", "apply_dose", "quad_trace", "leaks_per_matrix",
            "summarize_by_type", "matrix_type", "rank_rule_spec", "scratch_bytes_needed",
-           "check_scratch_space", "SolveState"]
+           "check_scratch_space", "SolveState", "non_pd_summary", "NON_PD_MESSAGE"]
 
 SOLVERS = ("readout", "grams")
 CONVENTION = "erase by subtraction: W_new = W - M (X = target, Y = retained)"
@@ -65,8 +65,30 @@ LEAK_FIELDS = ("L_X_rel", "L_Y_rel")
 LAM_SVD_DTYPES = ("float32", "float64")
 
 
+#: The phrase every non-PD warning carries.
+NON_PD_MESSAGE = "G_mu is not numerically positive definite at the requested ridge"
+
+
 def _noop(_event, _info):
     return None
+
+
+def non_pd_summary(records) -> str | None:
+    """ONE warning for every non-PD solve of a run (``SolveState.non_pd``):
+    counts by solver path, over matrices and over (input key, dose) solves.
+    ``None`` when every solve was PD."""
+    if not records:
+        return None
+    paths: dict = {}
+    for r in records:
+        paths[r["solve_path"]] = paths.get(r["solve_path"], 0) + 1
+    keys = sorted({r["input_key"] for r in records})
+    n_solves = len({(r["input_key"], r["mu_per_token"]) for r in records})
+    by_path = ", ".join(f"{p}: {c}" for p, c in sorted(paths.items()))
+    return (f"{NON_PD_MESSAGE} for {len(records)} matrix solve(s) ({by_path}) over "
+            f"{n_solves} (input key, dose) solve(s) at {len(keys)} input key(s), e.g. "
+            f"{keys[:3]} (common for LayerNorm-fed inputs); per-matrix detail in "
+            f"report.non_pd and matrices[name]['solve_path' / 'ridge_delta']")
 
 
 def _check_solver(solver):
@@ -191,12 +213,15 @@ class SolveState:
         self.pass_plan: list = []
         self.stats: dict = {"passes": []}
         self.warnings: list = []
+        #: one record per (matrix, dose) whose ``G_mu`` was not numerically PD at the
+        #: requested ridge (summarised by :func:`non_pd_summary`).
+        self.non_pd: list = []
 
 
 def run_gram_passes(h, state, *, retained, n_y, keys, rep, d_in_of, device_of_key,
                     gram_budget_bytes, resume_from_cache=True, eig_extremes=True,
                     ridge_rel=0.0, lam_svd_dtype="float32", target=None, n_x=None,
-                    progress=None, progress_every=100) -> None:
+                    progress=None, progress_every=100, full_spectrum=False) -> None:
     """Plan the Gram passes under ``gram_budget_bytes`` per device, accumulate
     each pass's float64 retained Grams ``G_Y`` (and, under ``grams``, the target
     Grams ``G_X``) over the sequences, and solve them (:func:`solve_pass`) before
@@ -205,6 +230,9 @@ def run_gram_passes(h, state, *, retained, n_y, keys, rep, d_in_of, device_of_ke
     ``retained`` / ``target`` are zero-argument callables returning a fresh
     iterator of ``[1, T]`` input-id tensors on the model's input device (called
     once per pass); ``n_y`` / ``n_x`` their total token counts.
+    ``full_spectrum`` keeps the whole ``gamma`` spectrum per input key
+    (readout solver). Every non-PD solve is recorded in ``state.non_pd`` and
+    summarised in ONE warning after the last pass.
     """
     progress = progress or _noop
     solver = state.solver
@@ -257,7 +285,7 @@ def run_gram_passes(h, state, *, retained, n_y, keys, rep, d_in_of, device_of_ke
         t0 = time.perf_counter()
         solve_pass(h, state, pkeys, grams, n_x=n_x, ridge_rel=ridge_rel,
                    eig_extremes=eig_extremes, lam_svd_dtype=lam_svd_dtype, grams_X=grams_X,
-                   progress=progress)
+                   progress=progress, full_spectrum=full_spectrum)
         rec["solve_s"] = round(time.perf_counter() - t0, 3)
         state.stats["passes"].append(rec)
         del grams, grams_X
@@ -268,10 +296,15 @@ def run_gram_passes(h, state, *, retained, n_y, keys, rep, d_in_of, device_of_ke
     for b in (boundary, boundary_X):
         if b is not None:
             b.clear()
+    msg = non_pd_summary(state.non_pd)
+    if msg is not None:
+        state.warnings.append(msg)
+        progress("warning", {"message": msg})
 
 
 def solve_pass(h, state, pkeys, grams, *, n_x, ridge_rel=0.0, eig_extremes=True,
-               lam_svd_dtype="float32", grams_X=None, progress=None) -> None:
+               lam_svd_dtype="float32", grams_X=None, progress=None,
+               full_spectrum=False) -> None:
     """Every solve that needs the retained Gram ``G_Y``, per input of one pass;
     each Gram is dropped as soon as its input is done.
 
@@ -315,7 +348,8 @@ def solve_pass(h, state, pkeys, grams, *, n_x, ridge_rel=0.0, eig_extremes=True,
             entry.update(lam_min=lo, lam_max=hi, lam_ratio=lo / max(hi, 1e-300),
                          eig_estimate=einfo)
         if not grams_mode:
-            entry["specificity"] = specificity(G_Y, X, n_y, ridge_rel=ridge_rel)
+            entry["specificity"] = specificity(G_Y, X, n_y, ridge_rel=ridge_rel,
+                                               full=bool(full_spectrum))
         state.specificity[k] = entry
         members = state.key_members[k]
         ret_e, tgt_e = {}, {}
@@ -343,12 +377,8 @@ def solve_pass(h, state, pkeys, grams, *, n_x, ridge_rel=0.0, eig_extremes=True,
                 factor, info = factor_grams(G_X, G_Y, mu, ridge_rel=ridge_rel)
             entry.setdefault("ridge_delta", {})[str(di)] = info.get("ridge_delta", 0.0)
             entry.setdefault("solve_path", {})[str(di)] = info["solver"]
-            if info["solver"] == "eigh" or info.get("ridge_delta", 0.0) > 1.01 * base_delta:
-                msg = (f"{k} dose {dose.mu_per_token:g}: solver {info['solver']}, ridge delta "
-                       f"{info.get('ridge_delta', 0.0):.3e} (requested {base_delta:.3e}): G_mu "
-                       f"is not numerically positive definite at the requested ridge")
-                state.warnings.append(msg)
-                progress("warning", {"message": msg})
+            non_pd = (info["solver"] == "eigh"
+                      or info.get("ridge_delta", 0.0) > 1.01 * base_delta)
             for n in members:
                 W = w64(n)
                 if not grams_mode:
@@ -369,6 +399,12 @@ def solve_pass(h, state, pkeys, grams, *, n_x, ridge_rel=0.0, eig_extremes=True,
                           retained_mse_per_token=dg["ly_energy"] / float(n_y),
                           erased_mse_per_token=dg["lx_energy"] / max(int(n_x), 1))
                 state.diag_by_dose[di][n] = dg
+                if non_pd:
+                    state.non_pd.append({
+                        "matrix": n, "input_key": k, "mu_per_token": dose.mu_per_token,
+                        "solve_path": info["solver"],
+                        "ridge_delta": info.get("ridge_delta", 0.0),
+                        "requested_ridge_delta": base_delta})
                 del W, comp
             if not grams_mode:
                 del S64, SXt
@@ -400,6 +436,8 @@ def solve_pass(h, state, pkeys, grams, *, n_x, ridge_rel=0.0, eig_extremes=True,
                         "d_in": d, "fit": float(comp.info["fit"]), "input_key": k,
                         "L_X_rel": dg["L_X_rel"], "L_Y_rel": dg["L_Y_rel"],
                         "retained_rel": dg["retained_rel"], "erased_rel": dg["erased_rel"],
+                        "retained_disturbed_rel": dg["retained_disturbed_rel"],
+                        "target_surviving_rel": dg["target_surviving_rel"],
                         "delta_fro": dg["delta_fro"], "w_fro": dg["w_fro"],
                         "solve_path": state.diag_by_dose[di][n]["solve_path"],
                         "ridge_delta": state.diag_by_dose[di][n]["ridge_delta"],

@@ -21,10 +21,13 @@ full-rank edit is always solved beside the rules. With more than one rule,
 full-rank edit); afterwards ``report.apply_dose(m, rule)`` applies any solved
 ``(dose, rule)`` setting (``rule=None`` is the full-rank edit).
 
-The model is edited in place (``W_new = W - M`` for every selected matrix);
-:func:`restore` puts every edited weight back bit for bit. A model that
-carries an applied erasure is refused by ``erase`` until it is restored, so a
-second solve never starts from edited weights.
+The model is edited in place (``W_new = W - M`` for every selected matrix).
+The edit lock belongs to the MODEL (an :class:`_EditLock` attached to it): at
+most one report's edit is applied at a time, and while one is, every other
+report's ``apply_dose`` and every new ``erase`` on that model refuse, naming
+the holder -- so no edit is ever stacked on another and no solve starts from
+edited weights. :func:`restore` restores whichever report holds the model, bit
+for bit, and releases the lock.
 
 ``target`` and ``retained`` are token ids -- a ``LongTensor`` (``[T]`` one
 sequence, ``[B, T]`` B sequences), a list of 1-D tensors / int lists, or (with
@@ -35,6 +38,7 @@ sequence, ``[B, T]`` B sequences), a list of 1-D tensors / int lists, or (with
 """
 from __future__ import annotations
 
+import itertools
 import json
 import math
 import os
@@ -49,7 +53,7 @@ import torch
 from .capture.grams import MemorySpill, TensorSpill, gram_bytes
 from .capture.hf import harvest_inputs_concat
 from .dose import dose_from_mu_per_token
-from .models.harness import HFLinearHarness, group_by_input
+from .models.harness import HFLinearHarness, group_by_input, key_layer
 from .models.pristine import PristineStore
 from .models.quirks import detect_quirks
 from .models.selector import resolve_selector
@@ -59,15 +63,24 @@ from .pipeline import (CONVENTION, SOLVERS, LEAK_FIELDS, SolveState, apply_dose,
 
 __all__ = ["erase", "restore", "EditReport"]
 
-_SESSIONS: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+#: Attribute of the model object that holds its :class:`_EditLock`.
+_LOCK_ATTR = "_srspd_edit_lock"
+_REPORT_IDS = itertools.count(1)
+#: ``spectrum=`` values of :func:`erase`.
+SPECTRA = ("top", "full")
 
 #: ``apply_rank_rule`` not given (``None`` is a choice: the full-rank edit).
 _UNSET = object()
 
 #: Per-matrix fields an :class:`EditReport` carries for the applied setting.
-MATRIX_FIELDS = ("input_key", "d_out", "d_in", "L_X_rel", "L_Y_rel", "erased_rel",
+MATRIX_FIELDS = ("input_key", "d_out", "d_in", "L_X_rel", "L_Y_rel",
+                 "target_surviving_rel", "retained_disturbed_rel", "erased_rel",
                  "retained_rel", "delta_fro", "w_fro", "rank", "rank_bound", "solve_path",
                  "ridge_delta", "erank")
+#: Deprecated per-matrix keys and the key that replaces each (same value).
+DEPRECATED_MATRIX_FIELDS = {"erased_rel": "target_surviving_rel",
+                            "retained_rel": "retained_disturbed_rel"}
+
 
 
 def _noop(_event, _info):
@@ -188,6 +201,56 @@ def _rule_index(rules, rule, what):
 
 
 # --------------------------------------------------------------------------- #
+# the model's edit lock                                                        #
+# --------------------------------------------------------------------------- #
+class _EditLock:
+    """Attached to a model (attribute ``_srspd_edit_lock``): ``holder`` is the
+    session whose edit is currently applied to it, or ``None``. Copies and
+    pickles of the model get a fresh, empty lock (the holder's pristine backup
+    belongs to the original)."""
+
+    def __init__(self):
+        self.holder = None
+
+    def __reduce__(self):
+        return (_EditLock, ())
+
+
+def _lock_of(model, create=False):
+    lock = getattr(model, "__dict__", {}).get(_LOCK_ATTR)
+    if lock is None and create:
+        lock = _EditLock()
+        object.__setattr__(model, _LOCK_ATTR, lock)
+    return lock
+
+
+def _holder(model):
+    """The session holding ``model``'s edit (``None`` if the model is pristine)."""
+    lock = _lock_of(model)
+    if lock is None or lock.holder is None:
+        return None
+    if lock.holder.closed or not lock.holder.store.is_edited:
+        lock.holder = None
+        return None
+    return lock.holder
+
+
+def _held_error(holder, me=None):
+    who = "" if me is None else f", not by this report ({me.describe()})"
+    return RuntimeError(
+        f"this model carries an applied erasure held by {holder.describe()}{who}: call "
+        f"srspd.restore(model) (or that report's close()) first so the solve starts from "
+        f"the pristine weights; applying on top would stack two edits")
+
+
+def _release(s):
+    m = s.model_ref()
+    lock = None if m is None else _lock_of(m)
+    if lock is not None and lock.holder is s:
+        lock.holder = None
+
+
+# --------------------------------------------------------------------------- #
 # report                                                                       #
 # --------------------------------------------------------------------------- #
 @dataclass
@@ -222,7 +285,19 @@ class EditReport:
     edit : ``{survival, rel_err, delta_fro_sum, by_type}`` of the applied edit.
     input_keys : ``{key: {members, d_in, gram_bytes}}``.
     quirks : ``{quirk name: detail}`` (:mod:`srspd.models.quirks`).
-    selector, pass_plan, specificity, stats, warnings.
+    selector, pass_plan, stats.
+    specificity : per input key; ``specificity[key]["specificity"]`` holds the
+        top eight ``gamma`` and, with ``erase(..., spectrum="full")``, the whole
+        spectrum under ``"spectrum"`` (pass the entry, or :meth:`spectrum`, to
+        :func:`srspd.suggest_mu_per_token`).
+    warnings : strings; non-PD solves are ONE summary warning per run.
+    non_pd : one record per (matrix, dose) whose ``G_mu`` was not numerically
+        PD at the requested ridge: ``{matrix, input_key, mu_per_token,
+        solve_path, ridge_delta, requested_ridge_delta}``.
+
+    ``matrices`` (and every per-matrix mapping) is ordered by block, then by
+    forward order within the block. ``erased_rel`` / ``retained_rel`` are
+    deprecated aliases of ``target_surviving_rel`` / ``retained_disturbed_rel``.
     """
     convention: str
     solver: str
@@ -246,6 +321,7 @@ class EditReport:
     specificity: dict
     stats: dict
     warnings: list
+    non_pd: list = field(default_factory=list)
     _session: Any = field(default=None, repr=False, compare=False)
 
     def to_dict(self) -> dict:
@@ -271,22 +347,27 @@ class EditReport:
         """Restore the pristine weights and apply the solved setting
         ``(mu_per_token, rule)``: ``mu_per_token`` one of :attr:`doses`, ``rule``
         ``None`` (the full-rank edit ``W - M``) or one of :attr:`rank_rules`
-        (``W - M_r``). Updates this report in place and returns it."""
+        (``W - M_r``). Updates this report in place and returns it.
+
+        Raises ``RuntimeError`` naming the holder when ANOTHER report's edit is
+        applied to the model (restore it first)."""
         s = self._need_session()
         idx = [i for i, d in enumerate(s.state.doses) if d.mu_per_token == float(mu_per_token)]
         if not idx:
             raise ValueError(f"mu_per_token {mu_per_token!r} was not solved; solved: "
                              f"{[d.mu_per_token for d in s.state.doses]}")
         ri = _rule_index(s.rules, rule, "rule")
-        s.store.restore_all()
-        _apply_into(self, s, idx[0], ri)
+        _apply_setting(self, s, idx[0], ri)
         return self
 
     def restore(self) -> list:
-        """Restore every edited weight bit for bit (:func:`restore`)."""
+        """Restore every weight this report edited, bit for bit, and release the
+        model's edit lock. Returns the restored names (``[]`` when this report
+        does not hold the model)."""
         s = self._need_session()
         names = s.store.restore_all()
         s.mark_restored()
+        _release(s)
         return names
 
     def close(self) -> None:
@@ -296,8 +377,24 @@ class EditReport:
         if s is None or s.closed:
             return
         s.store.restore_all()
+        _release(s)
         self.applied, self.dose, self.edit, self.rank_rule = False, None, None, None
         s.close()
+
+    def spectrum(self, name) -> list:
+        """The full ``gamma`` spectrum (descending) of input key or matrix
+        ``name``; needs ``erase(..., spectrum="full")``. Feed it to
+        :func:`srspd.suggest_mu_per_token`."""
+        key = name if name in self.specificity else (self.matrices.get(name) or {}).get(
+            "input_key")
+        if key not in self.specificity:
+            raise KeyError(f"{name!r} is neither an input key nor an edited matrix of this "
+                           f"report; input keys: {list(self.specificity)[:6]}")
+        spec = self.specificity[key].get("specificity") or {}
+        if "spectrum" not in spec:
+            raise ValueError("this report keeps only the top gamma values; re-run "
+                             "srspd.erase(..., spectrum='full') (readout solver)")
+        return list(spec["spectrum"])
 
 
 def _json_default(o):
@@ -312,6 +409,8 @@ def _json_default(o):
 
 class _Session:
     def __init__(self, model, h, store, state, rules, lam_index_of, scratch, own_scratch):
+        self.id = next(_REPORT_IDS)
+        self.applied_setting = None                # (mu_per_token, rank rule) when applied
         self.model_ref = weakref.ref(model)
         self.h, self.store, self.state = h, store, state
         self.rules = list(rules)
@@ -320,7 +419,14 @@ class _Session:
         self.closed = False
         self.report_ref = None
 
+    def describe(self) -> str:
+        what = ("nothing applied" if self.applied_setting is None else
+                f"applied mu_per_token {self.applied_setting[0]!r}, rank_rule "
+                f"{self.applied_setting[1]!r}")
+        return f"EditReport #{self.id} (solver {self.state.solver!r}, {what})"
+
     def mark_restored(self):
+        self.applied_setting = None
         r = self.report_ref() if self.report_ref is not None else None
         if r is not None:
             r.applied, r.dose, r.edit, r.rank_rule = False, None, None, None
@@ -331,15 +437,19 @@ class _Session:
         if self.own_scratch and self.scratch and os.path.isdir(self.scratch):
             shutil.rmtree(self.scratch, ignore_errors=True)
         self.closed = True
-        m = self.model_ref()
-        if m is not None and _SESSIONS.get(m) is self:
-            del _SESSIONS[m]
 
 
-def _matrix_rows(state, di, li, edit):
+def _ordered(h, d: dict) -> dict:
+    """``d`` (keyed by matrix name) in block order, then forward order within a
+    block (the harness's ``all_names``)."""
+    pos = {n: i for i, n in enumerate(h.all_names)}
+    return {n: d[n] for n in sorted(d, key=lambda n: (key_layer(n), pos.get(n, len(pos)), n))}
+
+
+def _matrix_rows(state, di, li, edit, h):
     src = state.diag_by_dose[di] if li is None else state.lam_info[li]
     out = {}
-    for n, d in src.items():
+    for n, d in _ordered(h, src).items():
         row = {f: d.get(f) for f in MATRIX_FIELDS}
         if li is not None:
             row["rank_bound"] = d.get("k")
@@ -350,10 +460,26 @@ def _matrix_rows(state, di, li, edit):
     return out
 
 
+def _apply_setting(report, s, di, ri=None):
+    """Take the model's edit lock for session ``s`` (refusing when another
+    session holds it), restore ``s``'s own edit, apply setting ``(di, ri)``."""
+    model = s.model_ref()
+    if model is None:                                         # pragma: no cover
+        raise RuntimeError("the model of this EditReport no longer exists")
+    holder = _holder(model)
+    if holder is not None and holder is not s:
+        raise _held_error(holder, s)
+    s.store.restore_all()
+    s.applied_setting = None
+    _lock_of(model, create=True).holder = s       # before writing: a failure stays restorable
+    _apply_into(report, s, di, ri)
+    s.applied_setting = (s.state.doses[di].mu_per_token, None if ri is None else s.rules[ri])
+
+
 def _apply_into(report, s, di, ri=None):
     li = None if ri is None else s.lam_index_of[(di, ri)]
     edit = apply_dose(s.h, s.store, s.state, di, lam_index=li)
-    report.matrices = _matrix_rows(s.state, di, li, edit)
+    report.matrices = _matrix_rows(s.state, di, li, edit, s.h)
     report.leaks_by_type = summarize_by_type(report.matrices, LEAK_FIELDS)
     report.edit = {k: v for k, v in edit.items() if k != "per_matrix"}
     report.dose = s.state.doses[di].as_dict()
@@ -368,7 +494,8 @@ def erase(model, tokenizer=None, *, target, retained, mu_per_token, apply=True,
           apply_mu_per_token=None, apply_rank_rule=_UNSET, layers=None, solver="readout", rank_rule=None,
           ridge_rel=0.0, device=None, gram_budget_gib=None, scratch_dir=None,
           progress: Callable | None = None, subtract_bias=False, resume_from_cache=True,
-          eig_extremes=True, lam_svd_dtype="float32", check_bracketing=True) -> EditReport:
+          eig_extremes=True, lam_svd_dtype="float32", check_bracketing=True,
+          spectrum="top") -> EditReport:
     """Erase the ``target`` behaviour from ``model`` while preserving
     ``retained``: for every selected linear weight ``W``,
     ``W_new = W - M``, ``M = W X^T X (X^T X + mu Y^T Y + delta I)^+``.
@@ -415,6 +542,10 @@ def erase(model, tokenizer=None, *, target, retained, mu_per_token, apply=True,
         that every ``rank_rule`` slices.
     check_bracketing : verify on the first target sequence that every hook
         brackets exactly ``x W^T`` (rel. tol 1e-2).
+    spectrum : ``"top"`` (default: the top eight ``gamma`` per input key) or
+        ``"full"`` (also the whole spectrum, ``specificity[key]["specificity"]
+        ["spectrum"]``, ready for :func:`srspd.suggest_mu_per_token`; readout
+        solver only).
 
     Returns
     -------
@@ -423,10 +554,14 @@ def erase(model, tokenizer=None, *, target, retained, mu_per_token, apply=True,
     progress = progress or _noop
     if solver not in SOLVERS:
         raise ValueError(f"solver must be one of {SOLVERS}, got {solver!r}")
-    prev = _SESSIONS.get(model)
-    if prev is not None and not prev.closed and prev.store.is_edited:
-        raise RuntimeError("this model carries an applied erasure: call srspd.restore(model) "
-                           "first so the solve starts from the pristine weights")
+    if spectrum not in SPECTRA:
+        raise ValueError(f"spectrum must be one of {SPECTRA}, got {spectrum!r}")
+    if spectrum == "full" and solver == "grams":
+        raise ValueError("spectrum='full' needs solver='readout': the gamma spectrum needs "
+                         "the target activations X, which the grams solver never holds")
+    holder = _holder(model)
+    if holder is not None:
+        raise _held_error(holder)
     rules = _rank_rules(rank_rule)
     if rules and solver == "grams":
         raise ValueError("rank_rule needs solver='readout': truncation acts on the target "
@@ -515,22 +650,23 @@ def erase(model, tokenizer=None, *, target, retained, mu_per_token, apply=True,
                     d_in_of=d_in_of, device_of_key=device_of_key, gram_budget_bytes=budget,
                     resume_from_cache=resume_from_cache, eig_extremes=eig_extremes,
                     ridge_rel=ridge_rel, lam_svd_dtype=lam_svd_dtype,
-                    target=target_iter if grams_mode else None, n_x=n_x, progress=progress)
+                    target=target_iter if grams_mode else None, n_x=n_x, progress=progress,
+                    full_spectrum=spectrum == "full")
 
     store = PristineStore(h, scratch)
     lam_index_of = {(ls["dose_index"], rules.index(ls["rule"])): li
                     for li, ls in enumerate(lam_settings)}
     session = _Session(model, h, store, state, rules, lam_index_of, scratch, own)
-    _SESSIONS[model] = session
 
     by_dose = {}
     for di, d in enumerate(doses):
         diags = state.diag_by_dose[di]
+        diags = _ordered(h, diags)
         ent = {"dose": d.as_dict(), "leaks": leaks_per_matrix(diags),
                "leaks_by_type": summarize_by_type(diags, LEAK_FIELDS + ("delta_fro",)),
                "truncated": {}}
         for ri, rule in enumerate(rules):
-            info = state.lam_info[lam_index_of[(di, ri)]]
+            info = _ordered(h, state.lam_info[lam_index_of[(di, ri)]])
             ent["truncated"][str(rule)] = {
                 "leaks": leaks_per_matrix(info),
                 "leaks_by_type": summarize_by_type(info, LEAK_FIELDS + ("delta_fro",)),
@@ -552,15 +688,15 @@ def erase(model, tokenizer=None, *, target, retained, mu_per_token, apply=True,
         stats={**state.stats, "gram_budget_bytes": int(budget),
                "n_target_sequences": len(tgt), "n_retained_sequences": len(ret),
                "scratch_dir": scratch},
-        warnings=list(state.warnings), _session=session)
+        warnings=list(state.warnings), non_pd=list(state.non_pd), _session=session)
     session.report_ref = weakref.ref(report)
     if apply:
-        _apply_into(report, session, apply_index, apply_rule_index)
+        _apply_setting(report, session, apply_index, apply_rule_index)
         progress("applied", {"mu_per_token": doses[apply_index].mu_per_token,
                              "rank_rule": report.rank_rule,
                              "survival": report.edit["survival"]})
     else:
-        report.matrices = _matrix_rows(state, 0, None, None)
+        report.matrices = _matrix_rows(state, 0, None, None, h)
         report.leaks_by_type = summarize_by_type(report.matrices, LEAK_FIELDS)
     bad = [n for n, r in report.matrices.items()
            if any(r.get(f) is None or not math.isfinite(float(r[f])) for f in LEAK_FIELDS)]
@@ -570,11 +706,14 @@ def erase(model, tokenizer=None, *, target, retained, mu_per_token, apply=True,
 
 
 def restore(model) -> list:
-    """Restore every weight :func:`erase` edited on ``model``, bit for bit.
+    """Restore every weight :func:`erase` edited on ``model``, bit for bit,
+    whichever report applied the edit, and release the model's edit lock.
     Returns the restored matrix names (``[]`` if nothing is applied)."""
-    s = _SESSIONS.get(model)
-    if s is None or s.closed:
+    lock = _lock_of(model)
+    s = None if lock is None else lock.holder
+    if s is None:
         return []
     names = s.store.restore_all()
     s.mark_restored()
+    lock.holder = None
     return names

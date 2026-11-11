@@ -151,6 +151,10 @@ def test_truncate_component(ref, case, svd_dtype):
                                     "formula", "solver"))
 
 
+#: package-only leak keys -> the reference key holding the same value.
+NEW_NAMES = {new: old for old, new in srspd.solve.ENERGY_ALIASES.items()}
+
+
 @pytest.mark.parametrize("case", CASES, ids=IDS)
 def test_leaks(ref, case):
     (W, X, Y), ridge = _split(case)
@@ -161,14 +165,15 @@ def test_leaks(ref, case):
         for fa, fb, args in ((srspd.leaks_gram, ref.leaks_gram, (X, G_Y)),
                              (srspd.leaks, ref.leaks, (X, Y))):
             la, lb = fa(W, a, *args), fb(W, b, *args)
-            assert set(la) == set(lb)
+            # the package adds descriptive names of two reference keys (same values)
+            assert set(la) - set(NEW_NAMES) == set(lb)
             for k in la:
-                assert la[k] == pytest.approx(lb[k], rel=TOL, abs=1e-300), k
+                assert la[k] == pytest.approx(lb[NEW_NAMES.get(k, k)], rel=TOL, abs=1e-300), k
     a = srspd.erased_component_grams(W, G_X, G_Y, mu=1.0, ridge_rel=ridge)
     b = ref.erased_component_grams(W, G_X, G_Y, mu=1.0, ridge_rel=ridge)
     la, lb = srspd.leaks_grams(W, a, G_X, G_Y), ref.leaks_grams(W, b, G_X, G_Y)
     for k in la:
-        assert la[k] == pytest.approx(lb[k], rel=TOL, abs=1e-300), k
+        assert la[k] == pytest.approx(lb[NEW_NAMES.get(k, k)], rel=TOL, abs=1e-300), k
 
 
 @pytest.mark.parametrize("case", CASES, ids=IDS)

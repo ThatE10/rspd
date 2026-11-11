@@ -82,8 +82,9 @@ Disentanglement of `X` and `Y` is measured, never assumed. For every edited matr
     L_Y_rel = ‖M Yᵀ‖_F       / ‖W Yᵀ‖_F     retained response the edit disturbs
 
 Both are zero only when span(X) and span(Y) are disentangled and `M` is untruncated. Their
-squares are reported as `erased_rel = L_X_rel²` and `retained_rel = L_Y_rel²` (the names
-follow the code; read `erased_rel` as "fraction of target energy left"). From the Grams:
+squares are reported as `target_surviving_rel = L_X_rel²` (fraction of target energy left)
+and `retained_disturbed_rel = L_Y_rel²`; `erased_rel` / `retained_rel` are deprecated
+aliases of the same two values (read `erased_rel` as "fraction of target energy left"). From the Grams:
 `‖M Yᵀ‖² = tr(M G_Y Mᵀ)`, so `L_Y` never needs `Y` itself (`srspd.leaks_gram`,
 `srspd.leaks_grams`).
 
@@ -101,7 +102,8 @@ is mostly retained. At most `min(n_x, d_in)` values are nonzero (the target span
 them as the squared singular values of `X L_y⁻ᵀ / √n_x` with `L_y = chol(C_Y)` (one
 triangular solve), falling back to an `eigh` pseudo-inverse square root when `C_Y` is not
 positive definite. `srspd.erase` reports the top values, the median and the counts above
-1, 10 and 100 per input key (`report.specificity[key]["specificity"]`).
+1, 10 and 100 per input key (`report.specificity[key]["specificity"]`), and the whole
+spectrum with `spectrum="full"`.
 
 ## The dose
 

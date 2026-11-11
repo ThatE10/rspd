@@ -42,7 +42,6 @@ import tempfile
 import torch
 import transformers
 import srspd
-from srspd.models.export import export_checkpoint
 
 torch.manual_seed(0)                       # a tiny random GPT-2; use any HF causal LM
 model = transformers.GPT2LMHeadModel(transformers.GPT2Config(
@@ -57,7 +56,7 @@ report = srspd.erase(model, target=target, retained=retained,
 print(report.matrices["L01.mlp.c_fc"]["L_X_rel"],         # leaks of every edited matrix
       report.matrices["L01.mlp.c_fc"]["L_Y_rel"])
 report.apply_dose(3.0)                     # re-dose without a second pass over the data
-export_checkpoint(model, None, tempfile.mkdtemp())        # save the edited model
+srspd.export_checkpoint(model, None, tempfile.mkdtemp())  # save the edited model
 srspd.restore(model)                       # bit for bit
 report.close()
 ```
@@ -78,6 +77,8 @@ Command line (`[hf]` extra), each command printing one JSON document:
 srspd inspect MODEL [--layers SPEC]
 srspd erase MODEL --target target.txt --retained retained.txt --mu-per-token 0.3 1 3 \
     --apply-mu-per-token 1 --out edited/ --report report.json
+srspd erase MODEL --target target.txt --retained retained.txt --mu-per-token 0.3 1 3 \
+    --no-apply --spectrum full --report grid.json      # solve only: leaks of every dose
 srspd report report.json
 ```
 

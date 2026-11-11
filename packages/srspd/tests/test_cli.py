@@ -80,7 +80,7 @@ def test_erase_with_repeated_rank_rules(capsys, ckpt, tmp_path):
             "--mu-per-token", "1.0", "--dtype", "float32",
             "--rank-rule", "0.1", "--rank-rule", "erank"]
     code, out = _run(capsys, base)
-    assert code == 2 and "apply_rank_rule" in out["error"]
+    assert code == 2 and "--apply-rank-rule" in out["error"] and "--no-apply" in out["error"]
     code, rep = _run(capsys, base + ["--apply-rank-rule", "erank"])
     assert code == 0 and rep["applied"] and rep["rank_rule"] == "erank"
     assert rep["rank_rules"] == [0.1, "erank"] and len(rep["settings"]) == 3

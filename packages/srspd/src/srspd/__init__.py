@@ -18,8 +18,9 @@ Modules: :mod:`srspd.solve` (solve, truncation, edit, leaks, specificity),
 
 On a resident HF model: :func:`erase` (harvest, Gram passes, solve at every
 requested ``mu_per_token``, apply ``W - M`` to every selected matrix, leaks per
-matrix -> :class:`EditReport`), :func:`restore` (bit-for-bit), and
-:func:`inspect_model` (what would be edited, input keys, Gram bytes, quirks).
+matrix -> :class:`EditReport`), :func:`restore` (bit-for-bit), :func:`inspect_model` (what would be edited,
+input keys, Gram bytes, quirks) and :func:`export_checkpoint` (save the edited
+model as a loadable HF checkpoint).
 Subpackages :mod:`srspd.models` (selector, quirks, harness, export) and
 :mod:`srspd.capture` (activation sources, Gram sinks). Only ``torch`` is
 needed to import the package; ``transformers`` / ``safetensors`` (the ``[hf]``
@@ -31,6 +32,7 @@ from .coala import compress_weight, fit_coala
 from .dose import Dose, dose_from_mu_per_token, erased_fraction, suggest_mu_per_token
 from .erank import effective_rank
 from .api import EditReport, erase, restore
+from .models.export import export_checkpoint
 from .models.inspect import inspect_model
 from .solve import (CORE_TABLE, ErasedComponent, ErasureConventionError, KeptMap,
                     apply_erasure, erased_component, erased_component_gram,
@@ -45,5 +47,5 @@ __all__ = [
     "leaks_grams", "specificity", "ErasedComponent", "KeptMap", "ErasureConventionError",
     "CORE_TABLE", "fit_coala", "compress_weight", "Dose", "dose_from_mu_per_token",
     "suggest_mu_per_token", "erased_fraction", "effective_rank", "erase", "restore",
-    "inspect_model", "EditReport", "__version__",
+    "inspect_model", "export_checkpoint", "EditReport", "__version__",
 ]

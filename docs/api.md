@@ -12,10 +12,11 @@ Math: `docs/math.md`. Workflow: `AGENTS.md`.
 
 | symbol | semantics |
 | --- | --- |
-| `erase(model, tokenizer=None, *, target, retained, mu_per_token, apply=True, apply_mu_per_token=None, apply_rank_rule=<unset>, layers=None, solver="readout", rank_rule=None, ridge_rel=0.0, device=None, gram_budget_gib=None, scratch_dir=None, progress=None, subtract_bias=False, resume_from_cache=True, eig_extremes=True, lam_svd_dtype="float32", check_bracketing=True) -> EditReport` | Harvest `X` from `target` and stream `G_Y` from `retained`, solve `M` for every selected matrix at every dose (and rank rule), apply one setting in place (`W − M`), measure leaks per matrix. Refuses a model carrying an applied erasure. |
-| `restore(model) -> list` | Put every weight `erase` edited on `model` back bit for bit; returns the restored names (`[]` if nothing applied). |
+| `erase(model, tokenizer=None, *, target, retained, mu_per_token, apply=True, apply_mu_per_token=None, apply_rank_rule=<unset>, layers=None, solver="readout", rank_rule=None, ridge_rel=0.0, device=None, gram_budget_gib=None, scratch_dir=None, progress=None, subtract_bias=False, resume_from_cache=True, eig_extremes=True, lam_svd_dtype="float32", check_bracketing=True, spectrum="top") -> EditReport` | Harvest `X` from `target` and stream `G_Y` from `retained`, solve `M` for every selected matrix at every dose (and rank rule), apply one setting in place (`W − M`), measure leaks per matrix. `spectrum="full"` (readout only) keeps the whole `γ` spectrum per input key in `report.specificity`. Refuses a model carrying an applied erasure (the error names the holding report). |
+| `restore(model) -> list` | Put every weight `erase` edited on `model` back bit for bit, whichever report applied the edit, and release the model's edit lock; returns the restored names (`[]` if nothing applied). |
 | `inspect_model(model_or_id, layers=None, *, subtract_bias=False, gram_budget_gib=None, trust_remote_code=False) -> dict` | What `erase` would edit: selector, matrices (shape, dtype, input key), input keys with Gram bytes per solver, totals, quirks, warnings; `pass_plan` with a budget. A hub id / local dir is built on the `meta` device (no weights). |
-| `EditReport` | Dataclass returned by `erase`; fields in `AGENTS.md` ("Read the report"). Methods: `apply_dose(mu_per_token, rule=None)` restores then applies a solved setting and returns the report; `restore()`; `close()` restores the model and frees the solve; `to_dict()`; `to_json(path=None, **json_kw) -> str`. |
+| `EditReport` | Dataclass returned by `erase`; fields in `AGENTS.md` ("Read the report"); `matrices` in block, then forward order; `non_pd` lists every non-PD solve (one summary warning per run). Methods: `apply_dose(mu_per_token, rule=None)` restores then applies a solved setting and returns the report (refuses, naming the holder, while another report's edit is applied: the edit lock belongs to the model); `restore()` (also releases the lock); `close()` restores the model and frees the solve; `spectrum(name) -> list` the full `γ` of an input key or matrix (needs `spectrum="full"`); `to_dict()`; `to_json(path=None, **json_kw) -> str`. |
+| `export_checkpoint(model, tokenizer, out_dir, *, source=None, token=None) -> dict` | Re-export of `srspd.models.export.export_checkpoint` (below). |
 
 ## `srspd` — tensors
 
@@ -28,7 +29,7 @@ Math: `docs/math.md`. Workflow: `AGENTS.md`.
 | `factor_grams(G_X, G_Y, mu, *, rcond=None, ridge_rel=0.0) -> (GramMuFactor, info)` | Factor `G_X + μG_Y + δI` once per input and dose for `erased_component_grams(factor=)`; same PD test, ridge ladder and fallback as the readout. |
 | `truncate_component(comp_full, X, specs, *, svd_dtype=torch.float32) -> list` | Several truncations (`lam_rel` floats in [0, 1) and/or `"erank"`) of one full-rank readout-form component from one SVD of `M Xᵀ`. |
 | `apply_erasure(W, component) -> Tensor` | `W − A @ B` for an `ErasedComponent`, in `W`'s dtype/device. Anything else raises `ErasureConventionError`. |
-| `leaks(W, component, X, Y) -> dict` | `L_X_rel`, `L_Y_rel`, `erased_rel` (= `L_X_rel²`), `retained_rel` (= `L_Y_rel²`), `delta_fro`, `w_fro`, energies. |
+| `leaks(W, component, X, Y) -> dict` | `L_X_rel`, `L_Y_rel`, `target_surviving_rel` (= `L_X_rel²`, target energy left), `retained_disturbed_rel` (= `L_Y_rel²`), the deprecated aliases `erased_rel` / `retained_rel` (same values), `delta_fro`, `w_fro`, energies. |
 | `leaks_gram(W, component, X, G_Y, *, ret_energy=None) -> dict` | Same keys from `G_Y` (plus `ret_energy`), never forming `M Yᵀ`. |
 | `leaks_grams(W, component, G_X, G_Y, *, ret_energy=None, target_energy=None) -> dict` | Same from both Grams (plus `mx_energy`). |
 | `specificity(G_Y, X, n_y, k=8, *, ridge_rel=0.0, full=False) -> dict` | Generalised eigenvalues `γ` of `C_X` vs `C_Y`: `top` (k largest), `median`, `n_above` (`{"1","10","100"}`), `n`, `solver`, and with `full=True` the whole `spectrum`. |
@@ -57,6 +58,7 @@ Math: `docs/math.md`. Workflow: `AGENTS.md`.
 | `key_layer(key) -> int` | Block index of an input key (`-1` if none). |
 | `group_by_input(names) -> dict` | `{input key: [member names]}`. |
 | `inspect_model(...)` | As `srspd.inspect_model`. |
+| `export_checkpoint(...)` | `srspd.models.export.export_checkpoint` (below); also `srspd.export_checkpoint`. |
 | `PristineStore(harness, scratch_dir=None)` | RAM- or disk-backed pristine weights: `write(name, value)`, `pristine(name)`, `restore_all()`, `is_edited`. |
 | `QUIRKS` | Registry `{name: Quirk}`: `conv1d_transposed`, `biased_projection`, `multimodal_towers`, `kv_shared_layers`, `shared_input_check`, `bf16_edit_in_fp32`. |
 | `Quirk(name, description, detect, handled_by)` | One registry entry; `detect(model, harness)` returns a detail dict or `None`. |
@@ -111,10 +113,12 @@ and tokenizer, read one document per non-empty line, erase, print the report.
 | --- | --- |
 | `--target FILE` / `--retained FILE` | text files of `X` / `Y` documents, one per line (required) |
 | `--mu-per-token M [M ...]` | the dose(s) (required) |
-| `--apply-mu-per-token M` | which dose to apply (required with several) |
+| `--apply-mu-per-token M` | which dose to apply (required with several, unless `--no-apply`) |
+| `--no-apply` | solve every dose and rule, apply none: the report only (excludes `--apply-mu-per-token`, `--apply-rank-rule`, `--out`) |
+| `--spectrum top|full` | as `spectrum=` (default `top`; `full` keeps the whole `γ` spectrum) |
 | `--solver readout|grams` | as `solver=` (default `readout`) |
 | `--rank-rule R` | a `lam_rel` in (0, 1) or `erank`; repeat for several |
-| `--apply-rank-rule R|full` | which rule to apply (required with several); `full` = full rank |
+| `--apply-rank-rule R|full` | which rule to apply (required with several, unless `--no-apply`); `full` = full rank |
 | `--ridge-rel R` | relative ridge (default 0) |
 | `--layers SPEC` | as for `inspect` |
 | `--dtype bfloat16|float16|float32` | load and export dtype (default `bfloat16`) |

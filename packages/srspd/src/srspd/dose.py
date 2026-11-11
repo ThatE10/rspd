@@ -142,7 +142,9 @@ def _gamma_tensor(gamma):
     if isinstance(gamma, Mapping):
         if "spectrum" not in gamma:
             raise ValueError("suggest_mu_per_token needs the full gamma spectrum: pass "
-                             "srspd.specificity(..., full=True) or the spectrum itself")
+                             "srspd.specificity(..., full=True), an entry of "
+                             "srspd.erase(..., spectrum='full').specificity, or the spectrum "
+                             "itself")
         gamma = gamma["spectrum"]
     g = torch.as_tensor(gamma, dtype=torch.float64).reshape(-1)
     if g.numel() == 0:
@@ -161,7 +163,9 @@ def suggest_mu_per_token(gamma, fractions: Iterable[float] = (0.1, 0.5, 0.9),
     Parameters
     ----------
     gamma : the generalised-eigenvalue spectrum -- a sequence/tensor of
-        ``gamma >= 0``, or the dict from ``srspd.specificity(..., full=True)``.
+        ``gamma >= 0``, or the dict from ``srspd.specificity(..., full=True)``
+        (also ``report.specificity[key]["specificity"]`` of
+        ``srspd.erase(..., spectrum="full")``).
     fractions : erased fractions, each in ``(0, 1)``.
     quantiles : quantile levels of ``gamma``, each in ``[0, 1]``
         (``torch.quantile``, linear interpolation, over every value given).

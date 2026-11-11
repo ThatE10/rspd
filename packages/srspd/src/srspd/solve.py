@@ -643,6 +643,20 @@ def apply_erasure(W, component) -> torch.Tensor:
     return out.to(W.dtype)
 
 
+#: Deprecated leak-energy keys -> their descriptive names (same value). ``erased_rel``
+#: is ``L_X_rel^2``, the target energy that SURVIVES the edit, despite its name.
+ENERGY_ALIASES = {"erased_rel": "target_surviving_rel", "retained_rel": "retained_disturbed_rel"}
+
+
+def _with_energy_names(d: dict) -> dict:
+    """Add ``target_surviving_rel`` (= ``L_X_rel^2``) and ``retained_disturbed_rel``
+    (= ``L_Y_rel^2``) beside their deprecated aliases ``erased_rel`` /
+    ``retained_rel`` -- the same float objects, nothing recomputed."""
+    for old, new in ENERGY_ALIASES.items():
+        d[new] = d[old]
+    return d
+
+
 def leaks(W, component, X, Y) -> dict:
     """R4: the two leaks of ``W_new = W - M`` on stacked activations, relative:
 
@@ -654,7 +668,9 @@ def leaks(W, component, X, Y) -> dict:
     the core table with ``M_r`` in place of ``M``.
 
     Returns a dict of floats: ``L_X_rel``, ``L_Y_rel``, their squares
-    ``erased_rel = L_X_rel^2`` and ``retained_rel = L_Y_rel^2``, ``delta_fro =
+    ``target_surviving_rel = L_X_rel^2`` (target energy left) and
+    ``retained_disturbed_rel = L_Y_rel^2`` (retained energy disturbed), the same
+    two values under the deprecated names ``erased_rel`` / ``retained_rel``, ``delta_fro =
     ||M||_F``, ``w_fro = ||W||_F``, and the energies ``wx_energy =
     ||W X^T||^2``, ``lx_energy = ||(W - M) X^T||^2``, ``wy_energy``,
     ``ly_energy``.
@@ -670,10 +686,11 @@ def leaks(W, component, X, Y) -> dict:
     wy = float((W64 @ Y64.T).norm())
     lx = float(((W64 - M) @ X64.T).norm())
     ly = float((M @ Y64.T).norm())
-    return dict(L_X_rel=lx / max(wx, 1e-300), L_Y_rel=ly / max(wy, 1e-300),
-                retained_rel=(ly / max(wy, 1e-300)) ** 2, erased_rel=(lx / max(wx, 1e-300)) ** 2,
-                delta_fro=float(M.norm()), w_fro=float(W64.norm()),
-                wx_energy=wx ** 2, lx_energy=lx ** 2, wy_energy=wy ** 2, ly_energy=ly ** 2)
+    return _with_energy_names(dict(
+        L_X_rel=lx / max(wx, 1e-300), L_Y_rel=ly / max(wy, 1e-300),
+        retained_rel=(ly / max(wy, 1e-300)) ** 2, erased_rel=(lx / max(wx, 1e-300)) ** 2,
+        delta_fro=float(M.norm()), w_fro=float(W64.norm()),
+        wx_energy=wx ** 2, lx_energy=lx ** 2, wy_energy=wy ** 2, ly_energy=ly ** 2))
 
 
 def leaks_gram(W, component, X, G_Y, *, ret_energy=None) -> dict:
@@ -704,10 +721,11 @@ def leaks_gram(W, component, X, G_Y, *, ret_energy=None) -> dict:
     wx2 = float((WXt ** 2).sum())
     lx2 = float(((WXt - MXt) ** 2).sum())
     delta_fro = float(((A @ (B @ B.T)) * A).sum()) ** 0.5           # ||A B||_F
-    return dict(L_X_rel=(lx2 / max(wx2, 1e-300)) ** 0.5, L_Y_rel=(ly2 / max(wy, 1e-300)) ** 0.5,
-                retained_rel=ly2 / max(wy, 1e-300), erased_rel=lx2 / max(wx2, 1e-300),
-                delta_fro=delta_fro, w_fro=float(W64.norm()), ret_energy=wy,
-                wx_energy=wx2, lx_energy=lx2, wy_energy=wy, ly_energy=ly2)
+    return _with_energy_names(dict(
+        L_X_rel=(lx2 / max(wx2, 1e-300)) ** 0.5, L_Y_rel=(ly2 / max(wy, 1e-300)) ** 0.5,
+        retained_rel=ly2 / max(wy, 1e-300), erased_rel=lx2 / max(wx2, 1e-300),
+        delta_fro=delta_fro, w_fro=float(W64.norm()), ret_energy=wy,
+        wx_energy=wx2, lx_energy=lx2, wy_energy=wy, ly_energy=ly2))
 
 
 # --------------------------------------------------------------------------- #
@@ -889,8 +907,9 @@ def leaks_grams(W, component, G_X, G_Y, *, ret_energy=None, target_energy=None) 
         L_Y_rel^2 = tr(M G_Y M^T) / tr(W G_Y W^T)               (= ||M Y^T||^2 / ||W Y^T||^2)
 
     -- the same quantities as :func:`leaks` / :func:`leaks_gram` under the same
-    keys: ``L_X_rel``, ``L_Y_rel``, their squares ``erased_rel`` /
-    ``retained_rel``, ``delta_fro`` (``||M||_F``), ``w_fro``, ``ret_energy``,
+    keys: ``L_X_rel``, ``L_Y_rel``, their squares ``target_surviving_rel`` /
+    ``retained_disturbed_rel`` (deprecated aliases ``erased_rel`` /
+    ``retained_rel``), ``delta_fro`` (``||M||_F``), ``w_fro``, ``ret_energy``,
     and the energies ``wx_energy``, ``lx_energy``, ``wy_energy``, ``ly_energy``
     plus ``mx_energy = tr(M G_X M^T)`` (the component's own target response).
     ``ret_energy`` / ``target_energy`` take the two ``tr(W G W^T)`` precomputed
@@ -912,10 +931,11 @@ def leaks_grams(W, component, G_X, G_Y, *, ret_energy=None, target_energy=None) 
     del D
     ly2 = max(_quad_trace(M, GY), 0.0)
     mx2 = max(_quad_trace(M, GX), 0.0)
-    return dict(L_X_rel=(lx2 / max(wx, 1e-300)) ** 0.5, L_Y_rel=(ly2 / max(wy, 1e-300)) ** 0.5,
-                retained_rel=ly2 / max(wy, 1e-300), erased_rel=lx2 / max(wx, 1e-300),
-                delta_fro=float(M.norm()), w_fro=float(W64.norm()), ret_energy=wy,
-                wx_energy=wx, lx_energy=lx2, wy_energy=wy, ly_energy=ly2, mx_energy=mx2)
+    return _with_energy_names(dict(
+        L_X_rel=(lx2 / max(wx, 1e-300)) ** 0.5, L_Y_rel=(ly2 / max(wy, 1e-300)) ** 0.5,
+        retained_rel=ly2 / max(wy, 1e-300), erased_rel=lx2 / max(wx, 1e-300),
+        delta_fro=float(M.norm()), w_fro=float(W64.norm()), ret_energy=wy,
+        wx_energy=wx, lx_energy=lx2, wy_energy=wy, ly_energy=ly2, mx_energy=mx2))
 
 
 # --------------------------------------------------------------------------- #

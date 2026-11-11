@@ -3,8 +3,8 @@ on failure it prints ``{"error": ..., "type": ...}`` and exits with status 2.
 
     srspd inspect MODEL [--layers SPEC] [--subtract-bias] [--gram-budget-gib G]
     srspd erase MODEL --target FILE --retained FILE --mu-per-token M [M ...]
-                [--apply-mu-per-token M] [--solver readout|grams] [--rank-rule R ...]
-                [--apply-rank-rule R|full]
+                [--apply-mu-per-token M | --no-apply] [--solver readout|grams]
+                [--rank-rule R ...] [--apply-rank-rule R|full] [--spectrum top|full]
                 [--ridge-rel R] [--layers SPEC] [--dtype bfloat16|float16|float32]
                 [--device DEV] [--max-length N] [--out DIR] [--report PATH]
                 [--scratch-dir DIR] [--gram-budget-gib G]
@@ -20,7 +20,9 @@ cuts it to ``--max-length`` tokens (each document its own forward pass);
 KV-shared backfill from ``MODEL``. ``--rank-rule`` may be repeated (every rule
 is truncated from the same solve); with more than one, ``--apply-rank-rule``
 names the one to apply (``full`` = the full-rank edit), as ``--apply-mu-per-token``
-does for a list of doses.
+does for a list of doses. ``--no-apply`` solves every dose and rule and applies
+none (a solve-only run: the report carries the leaks of every setting; no
+``--out``).
 """
 from __future__ import annotations
 
@@ -85,7 +87,32 @@ def _cmd_inspect(a):
                          gram_budget_gib=a.gram_budget_gib)
 
 
+def _check_apply_choice(a):
+    """The CLI's own wording of :func:`srspd.erase`'s apply checks, raised
+    before any model is loaded."""
+    doses = sorted({float(m) for m in a.mu_per_token})
+    rules = []
+    for v in a.rank_rule or []:
+        r = _rank_rule(v)
+        if r is not None and r not in rules:
+            rules.append(r)
+    if a.no_apply:
+        given = [o for o, v in (("--apply-mu-per-token", a.apply_mu_per_token),
+                                ("--apply-rank-rule", a.apply_rank_rule),
+                                ("--out", a.out)) if v is not None]
+        if given:
+            raise ValueError(f"--no-apply applies nothing; drop {' / '.join(given)}")
+        return
+    if len(doses) > 1 and a.apply_mu_per_token is None:
+        raise ValueError(f"{len(doses)} doses solved; pass --apply-mu-per-token <one of "
+                         f"{doses}> or --no-apply (solve only)")
+    if len(rules) > 1 and a.apply_rank_rule is None:
+        raise ValueError(f"{len(rules)} rank rules solved; pass --apply-rank-rule <one of "
+                         f"{rules}, or full for the full-rank edit> or --no-apply (solve only)")
+
+
 def _cmd_erase(a):
+    _check_apply_choice(a)
     import torch
     import transformers
 
@@ -100,10 +127,11 @@ def _cmd_erase(a):
     extra = ({} if a.apply_rank_rule is None
              else {"apply_rank_rule": _rank_rule(a.apply_rank_rule)})
     rep = erase(model, tok, target=target, retained=retained, mu_per_token=mpt,
-                apply_mu_per_token=a.apply_mu_per_token, layers=parse_layers(a.layers),
-                solver=a.solver, rank_rule=_rank_rules(a.rank_rule), ridge_rel=a.ridge_rel,
+                apply=not a.no_apply, apply_mu_per_token=a.apply_mu_per_token,
+                layers=parse_layers(a.layers), solver=a.solver,
+                rank_rule=_rank_rules(a.rank_rule), ridge_rel=a.ridge_rel,
                 gram_budget_gib=a.gram_budget_gib, scratch_dir=a.scratch_dir,
-                subtract_bias=a.subtract_bias, **extra)
+                subtract_bias=a.subtract_bias, spectrum=a.spectrum, **extra)
     out = rep.to_dict()
     if a.out:
         out["export"] = export_checkpoint(model, tok, a.out, source=a.model)
@@ -152,7 +180,10 @@ def build_parser():
     p.add_argument("--target", required=True, help="text file, one document per line (X)")
     p.add_argument("--retained", required=True, help="text file, one document per line (Y)")
     p.add_argument("--mu-per-token", type=float, nargs="+", required=True)
-    p.add_argument("--apply-mu-per-token", type=float)
+    p.add_argument("--apply-mu-per-token", type=float,
+                   help="which dose to apply (needed with several, unless --no-apply)")
+    p.add_argument("--no-apply", action="store_true",
+                   help="solve every dose and rule, apply none (report only; no --out)")
     p.add_argument("--solver", choices=("readout", "grams"), default="readout")
     p.add_argument("--rank-rule", action="append",
                    help="lam_rel in (0, 1) or 'erank' (readout solver); repeat for several "
@@ -161,6 +192,8 @@ def build_parser():
                    help="which solved rule to apply: a --rank-rule value or 'full' (needed "
                         "with more than one --rank-rule)")
     p.add_argument("--ridge-rel", type=float, default=0.0)
+    p.add_argument("--spectrum", choices=("top", "full"), default="top",
+                   help="'full' keeps the whole gamma spectrum per input key in the report")
     p.add_argument("--layers")
     p.add_argument("--dtype", choices=("bfloat16", "float16", "float32"), default="bfloat16")
     p.add_argument("--device", default="cpu")
