@@ -176,8 +176,17 @@ probe = srspd.erase(model, target=target, retained=retained, layers=layers,
 grid = srspd.suggest_mu_per_token(probe.spectrum("L01.mlp.c_fc"),
                                   fractions=(0.5, 0.9), quantiles=(0.5, 0.9))
 print(grid["mu_per_token"])                             # pass this grid to erase
+# grid["rows"]: one {"quantile", "gamma", "fraction", "mu_per_token"} per (q, f),
+# quantile-major in the order given; pick a specific dose by its (q, f):
+m_med_90 = next(r["mu_per_token"] for r in grid["rows"]
+                if r["quantile"] == 0.5 and r["fraction"] == 0.9)
 probe.close()
 ```
+
+Which spectrum to pass: there is one per input key (matrices reading the same input share it),
+and `suggest_mu_per_token` suggests one global grid from whichever you give it. Pass the key of
+the layer you most need to erase at, or concatenate several keys' spectra to cover them all.
+Per-key doses are not supported yet (issue #8).
 
 Without a report, for one matrix from raw activations:
 
@@ -331,10 +340,13 @@ edit, not a measurement of the edited model's behaviour: evaluate the edited mod
 ### 6. Re-dose, restore, export
 
 ```python runnable
+srspd.restore(model)                   # back to the original weights
+pristine = {k: v.clone() for k, v in model.state_dict().items()}   # optional: to verify restore
 report.apply_dose(3.0)                 # restores the pristine weights, applies dose 3.0
 assert report.dose["mu_per_token"] == 3.0
 names = srspd.restore(model)           # bit for bit; returns the restored matrix names
 assert names and not report.applied
+assert all(torch.equal(v, pristine[k]) for k, v in model.state_dict().items())   # the check
 report.apply_dose(1.0)                 # any solved (dose, rule) again, no new pass over the data
 
 out = srspd.export_checkpoint(model, tokenizer, tempfile.mkdtemp())   # save_pretrained of the edited model
@@ -387,7 +399,7 @@ M_r = srspd.erased_component(W, X, Y, mu=dose.mu, rank=2)  # COALA truncation of
 | Grams exceed the budget in total | not an error: more Gram passes (`report.pass_plan`), each resuming from the cached residual stream | |
 | `scratch_dir` disk too small | `RuntimeError: scratch_dir ... has X GiB free but this erasure spills Y GiB ...` | larger disk, fewer doses, no `rank_rule` |
 | `G_μ` not numerically positive definite (common: LayerNorm outputs are mean-centred, so `Y` spans fewer than `d_in` directions) | not an error: the solve falls back to an `eigh` pseudo-inverse (or, with `ridge_rel > 0`, escalates the ridge ×10 up to `1e-6` first); `solve_path` says which, every such solve is listed in `report.non_pd`, and ONE summary warning `G_mu is not numerically positive definite at the requested ridge for N matrix solve(s) (eigh: ...) ...` is added per run | usually fine; a small `ridge_rel` (e.g. `1e-6`) gives `cholesky_ridge` and makes the dose formula approximate |
-| a biased `nn.Linear` selected | `ValueError: ... has a bias; the solve assumes a pure matmul ... Pass subtract_bias=True ...` | `subtract_bias=True` (the bias is never edited) |
+| a biased `nn.Linear` selected (GPT-2's `Conv1D` biases are handled automatically: the constant is subtracted at harvest, no flag needed) | `ValueError: ... has a bias; the solve assumes a pure matmul ... Pass subtract_bias=True ...` | `subtract_bias=True` (the bias is never edited) |
 | selector matches nothing / a non-linear module | `ValueError: no target projections discovered ...` / `TypeError: ... not nn.Linear/Conv1D` | fix `layers=` against `model.named_modules()` |
 | hooks do not bracket `x Wᵀ` | `AssertionError: bracketing probe violated ...` | model must be in `eval()`; the selector must end at the projection |
 | resumed pass not bitwise equal to a full forward | `ResumeGuardError` | `resume_from_cache=False` |
