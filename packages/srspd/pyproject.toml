@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "srspd"
+version = "0.0.1"
+description = "Closed-form selective erasure of behaviour from a model's linear layers, by subtraction."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["torch>=2.0"]
+
+[project.optional-dependencies]
+hf = ["transformers", "safetensors"]
+test = ["pytest", "numpy"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
