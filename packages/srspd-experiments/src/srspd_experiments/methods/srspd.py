@@ -35,13 +35,14 @@ SRSPD run):
    with the run's tokenizer;
 2. the model is loaded (:func:`srspd_experiments.models.load_causal_lm`) and the
    baseline held-out CE scored;
-3. :func:`srspd.erase` solves every ``mu_per_token`` from one set of Gram passes
-   (``apply=False``); for each dose the full-rank edit ``W - M`` is applied
-   (:meth:`srspd.EditReport.apply_dose`), exported to
-   ``<data root>/models/methods/<name>/srspd_mpt<mpt>/`` and scored;
-4. each rank rule is a further :func:`srspd.erase` call (the core applies one
-   rule per solve), exporting ``W - M_r`` as ``srspd_mpt<mpt>_lam<lam>`` /
-   ``srspd_mpt<mpt>_erank``.
+3. ONE :func:`srspd.erase` call (``apply=False``) runs one set of Gram passes,
+   solves every ``mu_per_token`` and truncates every rank rule of each dose
+   from one shared SVD of ``M X^T`` per matrix;
+4. every ``(dose, rule)`` setting is applied in turn
+   (:meth:`srspd.EditReport.apply_dose`), exported and scored: the full-rank
+   edit ``W - M`` to ``<data root>/models/methods/<name>/srspd_mpt<mpt>/``,
+   the truncated edits ``W - M_r`` to ``srspd_mpt<mpt>_lam<lam>`` /
+   ``srspd_mpt<mpt>_erank`` beside it.
 
 Every edit is restored bit for bit before the next. ``metrics.json`` (under
 ``<data root>/logs/methods/<name>/``) records the dose arithmetic (``mu`` and
@@ -232,20 +233,20 @@ def run(config, *, model=None, tokenizer=None, out_root=None, log_root=None,
           flush=True)
 
     exports, rows = {}, []
-    by_rule = {}
     with torch.no_grad():
-        for rule in [None] + list(R["rank_rule"]):
-            rep = srspd.erase(model, target=data.target_ids, retained=retained,
-                              mu_per_token=R["mu_per_token"], apply=False,
-                              layers=R["layers"], solver=R["solver"], rank_rule=rule,
-                              ridge_rel=R["ridge_rel"], gram_budget_gib=R["gram_budget_gib"],
-                              scratch_dir=R["scratch_dir"],
-                              resume_from_cache=R["resume_from_cache"],
-                              eig_extremes=R["eig_extremes"], lam_svd_dtype=R["lam_svd_dtype"],
-                              progress=progress)
-            try:
-                for m in R["mu_per_token"]:
-                    rep.apply_dose(m)
+        rep = srspd.erase(model, target=data.target_ids, retained=retained,
+                          mu_per_token=R["mu_per_token"], apply=False,
+                          layers=R["layers"], solver=R["solver"],
+                          rank_rule=list(R["rank_rule"]) or None,
+                          ridge_rel=R["ridge_rel"], gram_budget_gib=R["gram_budget_gib"],
+                          scratch_dir=R["scratch_dir"],
+                          resume_from_cache=R["resume_from_cache"],
+                          eig_extremes=R["eig_extremes"], lam_svd_dtype=R["lam_svd_dtype"],
+                          progress=progress)
+        try:
+            for m in R["mu_per_token"]:
+                for rule in [None] + list(R["rank_rule"]):
+                    rep.apply_dose(m, rule)
                     lab = export_label(m, rule)
                     d = rep.to_dict()
                     ent = {"label": lab, "rank_rule": rule, "dose": d["dose"],
@@ -265,13 +266,12 @@ def run(config, *, model=None, tokenizer=None, out_root=None, log_root=None,
                     print(f"[srspd] {lab}: held-out ΔCE " + " ".join(
                         f"{k} {ce[k] - ce0[k]:+.4f}" for k in ce)
                         + f" · survival {d['edit']['survival']:.4f}", flush=True)
-                by_rule["full" if rule is None else str(rule)] = {
-                    k: v for k, v in rep.to_dict().items()
-                    if k in ("convention", "solver", "doses", "rank_rule", "ridge_rel", "n_x",
-                             "n_y", "by_dose", "input_keys", "quirks", "selector",
-                             "pass_plan", "stats", "warnings")}
-            finally:
-                rep.close()
+            solve = {k: v for k, v in rep.to_dict().items()
+                     if k in ("convention", "solver", "doses", "rank_rules", "settings",
+                              "ridge_rel", "n_x", "n_y", "by_dose", "input_keys", "quirks",
+                              "selector", "pass_plan", "stats", "warnings")}
+        finally:
+            rep.close()
     metrics = {
         "name": name, "method": METHOD, "config_path": config_path,
         "config_sha256": config_sha, "model": R["model"],
@@ -280,7 +280,7 @@ def run(config, *, model=None, tokenizer=None, out_root=None, log_root=None,
         "mu_per_token": R["mu_per_token"], "solver": R["solver"], "rank_rule": R["rank_rule"],
         "ridge_rel": R["ridge_rel"], "n_x": data.n_target_tokens, "n_y": data.n_retained_tokens,
         "data_manifest": data.manifest, "baseline_ce_heldout": ce0, "exports": exports,
-        "solves": by_rule, "model_root": model_root, "log_dir": log_dir,
+        "solve": solve, "model_root": model_root, "log_dir": log_dir,
         "tracking": tracker.resolved, "torch": torch.__version__,
         "wall_seconds": round(time.time() - t0, 1),
     }

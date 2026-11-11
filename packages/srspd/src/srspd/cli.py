@@ -3,7 +3,8 @@ on failure it prints ``{"error": ..., "type": ...}`` and exits with status 2.
 
     srspd inspect MODEL [--layers SPEC] [--subtract-bias] [--gram-budget-gib G]
     srspd erase MODEL --target FILE --retained FILE --mu-per-token M [M ...]
-                [--apply-mu-per-token M] [--solver readout|grams] [--rank-rule R]
+                [--apply-mu-per-token M] [--solver readout|grams] [--rank-rule R ...]
+                [--apply-rank-rule R|full]
                 [--ridge-rel R] [--layers SPEC] [--dtype bfloat16|float16|float32]
                 [--device DEV] [--max-length N] [--out DIR] [--report PATH]
                 [--scratch-dir DIR] [--gram-budget-gib G]
@@ -16,7 +17,10 @@ comma-separated block indices (``0,1,5``) or a JSON object
 non-empty line of each text file, tokenises it with the model's tokenizer and
 cuts it to ``--max-length`` tokens (each document its own forward pass);
 ``--out`` writes the edited checkpoint (and the tokenizer) there, with the
-KV-shared backfill from ``MODEL``.
+KV-shared backfill from ``MODEL``. ``--rank-rule`` may be repeated (every rule
+is truncated from the same solve); with more than one, ``--apply-rank-rule``
+names the one to apply (``full`` = the full-rank edit), as ``--apply-mu-per-token``
+does for a list of doses.
 """
 from __future__ import annotations
 
@@ -43,7 +47,17 @@ def parse_layers(spec):
 def _rank_rule(v):
     if v is None or v == "erank":
         return v
+    if v == "full":
+        return None
     return float(v)
+
+
+def _rank_rules(vals):
+    """Repeated ``--rank-rule`` -> ``rank_rule=`` (``None``, one rule or a list)."""
+    if not vals:
+        return None
+    rules = [_rank_rule(v) for v in vals]
+    return rules[0] if len(rules) == 1 else rules
 
 
 def _read_docs(path):
@@ -83,11 +97,13 @@ def _cmd_erase(a):
     target = _tokenize(tok, _read_docs(a.target), a.max_length)
     retained = _tokenize(tok, _read_docs(a.retained), a.max_length)
     mpt = a.mu_per_token if len(a.mu_per_token) > 1 else a.mu_per_token[0]
+    extra = ({} if a.apply_rank_rule is None
+             else {"apply_rank_rule": _rank_rule(a.apply_rank_rule)})
     rep = erase(model, tok, target=target, retained=retained, mu_per_token=mpt,
                 apply_mu_per_token=a.apply_mu_per_token, layers=parse_layers(a.layers),
-                solver=a.solver, rank_rule=_rank_rule(a.rank_rule), ridge_rel=a.ridge_rel,
+                solver=a.solver, rank_rule=_rank_rules(a.rank_rule), ridge_rel=a.ridge_rel,
                 gram_budget_gib=a.gram_budget_gib, scratch_dir=a.scratch_dir,
-                subtract_bias=a.subtract_bias)
+                subtract_bias=a.subtract_bias, **extra)
     out = rep.to_dict()
     if a.out:
         out["export"] = export_checkpoint(model, tok, a.out, source=a.model)
@@ -109,7 +125,8 @@ def _cmd_report(a):
         return [{"matrix": n, field: v} for n, v in rows[: a.top]]
     return {"solver": r.get("solver"), "convention": r.get("convention"),
             "applied": r.get("applied"), "dose": r.get("dose"), "n_x": r.get("n_x"),
-            "n_y": r.get("n_y"), "rank_rule": r.get("rank_rule"), "matrices": len(mats),
+            "n_y": r.get("n_y"), "rank_rule": r.get("rank_rule"),
+            "rank_rules": r.get("rank_rules"), "matrices": len(mats),
             "leaks_by_type": r.get("leaks_by_type"), "edit": r.get("edit"),
             "worst_L_X_rel": worst("L_X_rel"), "worst_L_Y_rel": worst("L_Y_rel"),
             "doses": [d.get("mu_per_token") for d in r.get("doses") or []],
@@ -137,7 +154,12 @@ def build_parser():
     p.add_argument("--mu-per-token", type=float, nargs="+", required=True)
     p.add_argument("--apply-mu-per-token", type=float)
     p.add_argument("--solver", choices=("readout", "grams"), default="readout")
-    p.add_argument("--rank-rule", help="lam_rel in (0, 1) or 'erank' (readout solver)")
+    p.add_argument("--rank-rule", action="append",
+                   help="lam_rel in (0, 1) or 'erank' (readout solver); repeat for several "
+                        "rules, all truncated from one solve")
+    p.add_argument("--apply-rank-rule",
+                   help="which solved rule to apply: a --rank-rule value or 'full' (needed "
+                        "with more than one --rank-rule)")
     p.add_argument("--ridge-rel", type=float, default=0.0)
     p.add_argument("--layers")
     p.add_argument("--dtype", choices=("bfloat16", "float16", "float32"), default="bfloat16")

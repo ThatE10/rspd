@@ -12,6 +12,15 @@ Design (agent-facing)
   ``report.apply_dose(m)``, which restores the pristine weights and applies
   dose ``m`` -- no second pass over the data.
 
+``rank_rule`` works the same way: ``None`` (full rank only), one rule (a
+``lam_rel`` in (0, 1) or ``"erank"``) or a list of them. Every rule is
+truncated, per matrix and dose, from ONE thin SVD of ``M X^T`` shared by all
+rules, so a list costs one set of Gram passes and one solve per dose. The
+full-rank edit is always solved beside the rules. With more than one rule,
+``apply=True`` needs ``apply_rank_rule=`` (a solved rule, or ``None`` for the
+full-rank edit); afterwards ``report.apply_dose(m, rule)`` applies any solved
+``(dose, rule)`` setting (``rule=None`` is the full-rank edit).
+
 The model is edited in place (``W_new = W - M`` for every selected matrix);
 :func:`restore` puts every edited weight back bit for bit. A model that
 carries an applied erasure is refused by ``erase`` until it is restored, so a
@@ -51,6 +60,9 @@ from .pipeline import (CONVENTION, SOLVERS, LEAK_FIELDS, SolveState, apply_dose,
 __all__ = ["erase", "restore", "EditReport"]
 
 _SESSIONS: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+
+#: ``apply_rank_rule`` not given (``None`` is a choice: the full-rank edit).
+_UNSET = object()
 
 #: Per-matrix fields an :class:`EditReport` carries for the applied setting.
 MATRIX_FIELDS = ("input_key", "d_out", "d_in", "L_X_rel", "L_Y_rel", "erased_rel",
@@ -150,6 +162,31 @@ def _dose_key(dose):
     return repr(float(dose.mu_per_token))
 
 
+def _rank_rules(rank_rule) -> list:
+    """``rank_rule`` -> the de-duplicated truncation specs, in the order given
+    (``None`` entries of a list are the full-rank edit, always solved)."""
+    vals = list(rank_rule) if isinstance(rank_rule, (list, tuple)) else [rank_rule]
+    out = []
+    for v in vals:
+        if v is None:
+            continue
+        spec = rank_rule_spec(v)
+        if spec not in out:
+            out.append(spec)
+    return out
+
+
+def _rule_index(rules, rule, what):
+    """``None`` -> ``None`` (full rank); a solved rule -> its position in ``rules``."""
+    if rule is None:
+        return None
+    spec = rank_rule_spec(rule)
+    if spec not in rules:
+        raise ValueError(f"{what} {rule!r} was not solved; solved rank rules: {rules} "
+                         f"(None = the full-rank edit)")
+    return rules.index(spec)
+
+
 # --------------------------------------------------------------------------- #
 # report                                                                       #
 # --------------------------------------------------------------------------- #
@@ -165,7 +202,12 @@ class EditReport:
     dose : the applied dose, :meth:`srspd.dose.Dose.as_dict` (``mu_per_token``,
         the derived weights, ``n_x``, ``n_y``, ``formula``), or ``None``.
     doses : every solved dose, same form.
-    rank_rule : the truncation rule of the applied edit (``None`` = full rank).
+    rank_rule : the truncation rule of the applied edit (``None`` = full rank,
+        or nothing applied).
+    rank_rules : every solved truncation rule (the full-rank edit is always
+        solved besides).
+    settings : every solved ``(dose, rule)`` setting, ``[{"mu_per_token",
+        "rank_rule"}]``, dose-major, full rank (``rank_rule`` ``None``) first.
     ridge_rel : the requested relative ridge (the delta actually applied is per
         matrix, ``matrices[name]["ridge_delta"]``).
     n_x, n_y : target / retained token counts.
@@ -175,7 +217,8 @@ class EditReport:
         edit_fro (||W_new - W||_F as written), survival}}`` at the applied dose.
     leaks_by_type : ``{matrix type: {L_X_rel: {median, min, max}, ...}}``.
     by_dose : ``{repr(mu_per_token): {"dose", "leaks", "leaks_by_type",
-        "truncated"}}`` for every solved dose.
+        "truncated": {str(rule): {"leaks", "leaks_by_type", "rank_by_type"}}}}``
+        for every solved dose and rule.
     edit : ``{survival, rel_err, delta_fro_sum, by_type}`` of the applied edit.
     input_keys : ``{key: {members, d_in, gram_bytes}}``.
     quirks : ``{quirk name: detail}`` (:mod:`srspd.models.quirks`).
@@ -187,6 +230,8 @@ class EditReport:
     dose: dict | None
     doses: list
     rank_rule: Any
+    rank_rules: list
+    settings: list
     ridge_rel: float
     n_x: int
     n_y: int
@@ -222,16 +267,19 @@ class EditReport:
                                "from JSON or closed); re-run srspd.erase")
         return self._session
 
-    def apply_dose(self, mu_per_token) -> "EditReport":
-        """Restore the pristine weights and apply the solved dose ``mu_per_token``
-        (one of :attr:`doses`). Updates this report in place and returns it."""
+    def apply_dose(self, mu_per_token, rule=None) -> "EditReport":
+        """Restore the pristine weights and apply the solved setting
+        ``(mu_per_token, rule)``: ``mu_per_token`` one of :attr:`doses`, ``rule``
+        ``None`` (the full-rank edit ``W - M``) or one of :attr:`rank_rules`
+        (``W - M_r``). Updates this report in place and returns it."""
         s = self._need_session()
         idx = [i for i, d in enumerate(s.state.doses) if d.mu_per_token == float(mu_per_token)]
         if not idx:
             raise ValueError(f"mu_per_token {mu_per_token!r} was not solved; solved: "
                              f"{[d.mu_per_token for d in s.state.doses]}")
+        ri = _rule_index(s.rules, rule, "rule")
         s.store.restore_all()
-        _apply_into(self, s, idx[0])
+        _apply_into(self, s, idx[0], ri)
         return self
 
     def restore(self) -> list:
@@ -248,7 +296,7 @@ class EditReport:
         if s is None or s.closed:
             return
         s.store.restore_all()
-        self.applied, self.dose, self.edit = False, None, None
+        self.applied, self.dose, self.edit, self.rank_rule = False, None, None, None
         s.close()
 
 
@@ -263,10 +311,11 @@ def _json_default(o):
 
 
 class _Session:
-    def __init__(self, model, h, store, state, lam_index_of, scratch, own_scratch):
+    def __init__(self, model, h, store, state, rules, lam_index_of, scratch, own_scratch):
         self.model_ref = weakref.ref(model)
         self.h, self.store, self.state = h, store, state
-        self.lam_index_of = lam_index_of           # dose index -> lam index (or None)
+        self.rules = list(rules)
+        self.lam_index_of = lam_index_of           # (dose index, rule index) -> lam index
         self.scratch, self.own_scratch = scratch, own_scratch
         self.closed = False
         self.report_ref = None
@@ -274,7 +323,7 @@ class _Session:
     def mark_restored(self):
         r = self.report_ref() if self.report_ref is not None else None
         if r is not None:
-            r.applied, r.dose, r.edit = False, None, None
+            r.applied, r.dose, r.edit, r.rank_rule = False, None, None, None
 
     def close(self):
         self.state.readouts = self.state.lam_spill = self.state.component_spill = None
@@ -301,13 +350,14 @@ def _matrix_rows(state, di, li, edit):
     return out
 
 
-def _apply_into(report, s, di):
-    li = s.lam_index_of.get(di)
+def _apply_into(report, s, di, ri=None):
+    li = None if ri is None else s.lam_index_of[(di, ri)]
     edit = apply_dose(s.h, s.store, s.state, di, lam_index=li)
     report.matrices = _matrix_rows(s.state, di, li, edit)
     report.leaks_by_type = summarize_by_type(report.matrices, LEAK_FIELDS)
     report.edit = {k: v for k, v in edit.items() if k != "per_matrix"}
     report.dose = s.state.doses[di].as_dict()
+    report.rank_rule = None if ri is None else s.rules[ri]
     report.applied = True
 
 
@@ -315,7 +365,7 @@ def _apply_into(report, s, di):
 # erase / restore                                                              #
 # --------------------------------------------------------------------------- #
 def erase(model, tokenizer=None, *, target, retained, mu_per_token, apply=True,
-          apply_mu_per_token=None, layers=None, solver="readout", rank_rule=None,
+          apply_mu_per_token=None, apply_rank_rule=_UNSET, layers=None, solver="readout", rank_rule=None,
           ridge_rel=0.0, device=None, gram_budget_gib=None, scratch_dir=None,
           progress: Callable | None = None, subtract_bias=False, resume_from_cache=True,
           eig_extremes=True, lam_svd_dtype="float32", check_bracketing=True) -> EditReport:
@@ -331,15 +381,19 @@ def erase(model, tokenizer=None, *, target, retained, mu_per_token, apply=True,
     mu_per_token : the dose, a number > 0 or a list of them (``1 / mu_per_token``
         is the per-token Lagrange multiplier on the retained disturbance; larger
         erases more). See :mod:`srspd.dose`.
-    apply, apply_mu_per_token : which solved dose to apply (module docstring).
+    apply, apply_mu_per_token, apply_rank_rule : which solved ``(dose, rule)``
+        setting to apply (module docstring). ``apply_rank_rule`` is ``None``
+        (the full-rank edit) or one of the solved rules; it may be left out
+        when at most one rule is solved (that rule is then applied).
     layers : the layer selector (``None`` = auto preset; see
         :func:`srspd.models.selector.resolve_selector`).
     solver : ``"readout"`` (target held as activations; supports ``rank_rule``)
         or ``"grams"`` (target streamed into ``G_X``; for a target too large to
         hold).
-    rank_rule : ``None`` (full rank), a ``lam_rel`` in (0, 1) or ``"erank"``:
-        the applied edit is then ``W - M_r`` (COALA projector on ``M`` over
-        ``X``); ``readout`` only.
+    rank_rule : ``None`` (full rank), a ``lam_rel`` in (0, 1), ``"erank"``,
+        or a list of them: each rule's edit is ``W - M_r`` (COALA projector on
+        ``M`` over ``X``), every rule of a matrix and dose sliced from one
+        shared SVD of ``M X^T``; ``readout`` only.
     ridge_rel : relative ridge, ``delta = ridge_rel * max(diag(mu G_Y))``
         (escalated automatically when ``G_mu`` is not numerically PD; the delta
         used is reported per matrix).
@@ -357,7 +411,8 @@ def erase(model, tokenizer=None, *, target, retained, mu_per_token, apply=True,
     resume_from_cache : restart each Gram pass from the cached residual stream
         (bitwise-guarded; off automatically on KV-shared models).
     eig_extremes : record ``lam_min`` / ``lam_max`` of every ``G_Y``.
-    lam_svd_dtype : dtype of the SVD of ``M X^T`` behind ``rank_rule``.
+    lam_svd_dtype : dtype of the one SVD of ``M X^T`` (per matrix and dose)
+        that every ``rank_rule`` slices.
     check_bracketing : verify on the first target sequence that every hook
         brackets exactly ``x W^T`` (rel. tol 1e-2).
 
@@ -372,7 +427,7 @@ def erase(model, tokenizer=None, *, target, retained, mu_per_token, apply=True,
     if prev is not None and not prev.closed and prev.store.is_edited:
         raise RuntimeError("this model carries an applied erasure: call srspd.restore(model) "
                            "first so the solve starts from the pristine weights")
-    rules = [] if rank_rule is None else [rank_rule_spec(rank_rule)]
+    rules = _rank_rules(rank_rule)
     if rules and solver == "grams":
         raise ValueError("rank_rule needs solver='readout': truncation acts on the target "
                          "response M X^T, which the grams solver never forms")
@@ -399,6 +454,15 @@ def erase(model, tokenizer=None, *, target, retained, mu_per_token, apply=True,
                 raise ValueError(f"apply_mu_per_token {apply_mu_per_token!r} is not one of the "
                                  f"doses {[d.mu_per_token for d in doses]}")
             apply_index = hits[0]
+        if apply_rank_rule is _UNSET:
+            if len(rules) > 1:
+                raise ValueError(f"{len(rules)} rank rules solved; pass apply_rank_rule=<one of "
+                                 f"{rules}, or None for the full-rank edit> or apply=False "
+                                 f"(then report.apply_dose(m, rule))")
+            apply_rule = rules[0] if rules else None
+        else:
+            apply_rule = apply_rank_rule
+        apply_rule_index = _rule_index(rules, apply_rule, "apply_rank_rule")
     if check_bracketing:
         probe = tgt[0][:, :64].to(in_dev)
         h.verify_bracketing(h.harvest([probe]), "probe", rel_tol=1e-2)
@@ -454,8 +518,9 @@ def erase(model, tokenizer=None, *, target, retained, mu_per_token, apply=True,
                     target=target_iter if grams_mode else None, n_x=n_x, progress=progress)
 
     store = PristineStore(h, scratch)
-    lam_index_of = {ls["dose_index"]: li for li, ls in enumerate(lam_settings)}
-    session = _Session(model, h, store, state, lam_index_of, scratch, own)
+    lam_index_of = {(ls["dose_index"], rules.index(ls["rule"])): li
+                    for li, ls in enumerate(lam_settings)}
+    session = _Session(model, h, store, state, rules, lam_index_of, scratch, own)
     _SESSIONS[model] = session
 
     by_dose = {}
@@ -464,10 +529,9 @@ def erase(model, tokenizer=None, *, target, retained, mu_per_token, apply=True,
         ent = {"dose": d.as_dict(), "leaks": leaks_per_matrix(diags),
                "leaks_by_type": summarize_by_type(diags, LEAK_FIELDS + ("delta_fro",)),
                "truncated": {}}
-        li = lam_index_of.get(di)
-        if li is not None:
-            info = state.lam_info[li]
-            ent["truncated"][str(lam_settings[li]["rule"])] = {
+        for ri, rule in enumerate(rules):
+            info = state.lam_info[lam_index_of[(di, ri)]]
+            ent["truncated"][str(rule)] = {
                 "leaks": leaks_per_matrix(info),
                 "leaks_by_type": summarize_by_type(info, LEAK_FIELDS + ("delta_fro",)),
                 "rank_by_type": summarize_by_type(info, ("rank", "k", "r_frac", "erank"))}
@@ -475,7 +539,9 @@ def erase(model, tokenizer=None, *, target, retained, mu_per_token, apply=True,
 
     report = EditReport(
         convention=CONVENTION, solver=solver, applied=False, dose=None,
-        doses=[d.as_dict() for d in doses], rank_rule=(rules[0] if rules else None),
+        doses=[d.as_dict() for d in doses], rank_rule=None, rank_rules=list(rules),
+        settings=[{"mu_per_token": d.mu_per_token, "rank_rule": r}
+                  for d in doses for r in [None] + rules],
         ridge_rel=float(ridge_rel), n_x=n_x, n_y=n_y, matrices={}, leaks_by_type={},
         by_dose=by_dose, edit=None,
         input_keys={k: {"members": list(m), "d_in": d_in_of[k],
@@ -489,11 +555,12 @@ def erase(model, tokenizer=None, *, target, retained, mu_per_token, apply=True,
         warnings=list(state.warnings), _session=session)
     session.report_ref = weakref.ref(report)
     if apply:
-        _apply_into(report, session, apply_index)
+        _apply_into(report, session, apply_index, apply_rule_index)
         progress("applied", {"mu_per_token": doses[apply_index].mu_per_token,
+                             "rank_rule": report.rank_rule,
                              "survival": report.edit["survival"]})
     else:
-        report.matrices = _matrix_rows(state, 0, lam_index_of.get(0), None)
+        report.matrices = _matrix_rows(state, 0, None, None)
         report.leaks_by_type = summarize_by_type(report.matrices, LEAK_FIELDS)
     bad = [n for n, r in report.matrices.items()
            if any(r.get(f) is None or not math.isfinite(float(r[f])) for f in LEAK_FIELDS)]

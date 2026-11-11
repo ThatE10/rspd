@@ -26,7 +26,10 @@ print(report.to_json())
 
 `target` / `retained` are token ids (a `[T]` or `[B, T]` LongTensor, or a list of
 sequences); each sequence is its own forward. `solver="readout"` holds the target
-activations and supports `rank_rule` (`lam_rel` or `"erank"`); `solver="grams"` streams
-the target into a Gram for a target too large to hold. Command line:
+activations and supports `rank_rule` (`lam_rel` or `"erank"`, or a list of them: every
+rule is truncated from the same solve, one shared SVD per matrix and dose, so a list costs
+no extra Gram pass; pick the applied one with `apply_rank_rule=`, then
+`report.apply_dose(m, rule)` for any other, `rule=None` being the full-rank edit);
+`solver="grams"` streams the target into a Gram for a target too large to hold. Command line:
 `srspd inspect MODEL`, `srspd erase MODEL --target t.txt --retained r.txt --mu-per-token 1
 --out DIR`, `srspd report report.json`; each prints JSON.

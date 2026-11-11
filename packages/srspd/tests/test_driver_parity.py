@@ -22,6 +22,12 @@ difference would come from the float64 solve, which the package matches to
 fp32 spill except by a rounding-boundary flip, which this test would report.
 The leaks are compared to 1e-10 relative. Skipped cleanly when the reference
 repository or git is absent.
+
+The driver is also run with a LIST of rank rules (``RULES``, readout solver):
+it solves every rule from one set of Gram passes and exports the full-rank
+edit and one truncated edit per rule; one :func:`srspd.erase` call with the
+same rule list must reproduce every one of those exports bitwise (through
+``report.apply_dose(mu_per_token, rule)``), leaks included.
 """
 from __future__ import annotations
 
@@ -108,10 +114,15 @@ def _capture_streams(monkeypatch, drv):
     return seen
 
 
-def _mpt_cfg(r, mpt, solver):
+def _mpt_cfg(r, mpt, solver, rules=None):
     r.pop("mu_raw", None)
     r["mu_per_token"] = [mpt]
     r.update(skip_circuits=True, solver=solver)
+    r.pop("lam_rel", None)
+    if rules:
+        r["rank_rule"] = list(rules)
+    else:
+        r.pop("rank_rule", None)
     if "circuits" in r:
         r["circuits"]["export_ks"] = []
 
@@ -146,7 +157,7 @@ def _texts(corpus, n, words):
             for i in range(n)]
 
 
-def _run_mistral(ref, tmp_path, monkeypatch, solver, mpt):
+def _run_mistral(ref, tmp_path, monkeypatch, solver, mpt, rules=None):
     drv = ref["drv"]
     C, rcorp = drv.C, drv.rcorp
     monkeypatch.setenv("RSPD_DATA_DIR", str(tmp_path / "data"))
@@ -169,14 +180,14 @@ def _run_mistral(ref, tmp_path, monkeypatch, solver, mpt):
     # small enough for two passes (exercises the boundary resume on both sides)
     r["gram"] = dict(r.get("gram") or {}, budget_gib_per_device=(20000 if solver == "readout"
                                                                   else 40000) / 2 ** 30)
-    _mpt_cfg(r, mpt, solver)
+    _mpt_cfg(r, mpt, solver, rules)
     cp = tmp_path / f"{name}.yaml"
     cp.write_text(yaml.safe_dump(cfg))
     metrics = drv.run(str(cp))
     return metrics, seen, tmp_path / "data" / "models" / "wmdp" / name
 
 
-def _run_gpt2(ref, tmp_path, monkeypatch, solver, mpt):
+def _run_gpt2(ref, tmp_path, monkeypatch, solver, mpt, rules=None):
     drv, g2 = ref["drv"], ref["g2"]
     data = tmp_path / "data"
     monkeypatch.setenv("RSPD_DATA_DIR", str(data))
@@ -195,23 +206,32 @@ def _run_gpt2(ref, tmp_path, monkeypatch, solver, mpt):
     r["retained_corpus"]["buckets"] = [dict(b, tokens=640) for b in
                                        r["retained_corpus"]["buckets"]]
     r["gram"]["budget_gib_per_device"] = 2 ** 20 / 2 ** 30
-    _mpt_cfg(r, mpt, solver)
+    _mpt_cfg(r, mpt, solver, rules)
     cp = tmp_path / f"{name}.yaml"
     cp.write_text(yaml.safe_dump(cfg))
     metrics = drv.run(str(cp))
     return metrics, seen, data / "models" / "wmdp" / name, ckpt
 
 
-def _exported(model_dir):
+def _rule_suffix(rule):
+    return "" if rule is None else ("_erank" if rule == "erank" else f"_lam{float(rule):g}")
+
+
+def _exported(model_dir, rule=None):
+    """The driver's export of the full-rank edit (``rule=None``) or of rule ``rule``."""
     from safetensors.torch import load_file
-    (sub,) = [p for p in model_dir.iterdir() if p.is_dir() and p.name.startswith("srspd_mu")]
+    subs = [p for p in model_dir.iterdir() if p.is_dir() and p.name.startswith("srspd_mu")]
+    if rule is None:
+        (sub,) = [p for p in subs if "_lam" not in p.name and not p.name.endswith("_erank")]
+    else:
+        (sub,) = [p for p in subs if p.name.endswith(_rule_suffix(rule))]
     w = {}
     for f in sub.glob("*.safetensors"):
         w.update(load_file(str(f)))
     return w
 
 
-def _compare(model, exported, metrics, rep, dose_key, pristine):
+def _compare(model, exported, metrics, rep, dose_key, pristine, rule=None):
     params = dict(model.named_parameters())
     h = rep._session.h
     n_cmp = 0
@@ -228,7 +248,11 @@ def _compare(model, exported, metrics, rep, dose_key, pristine):
         if path in exported and not path.endswith(("_proj.weight", "c_attn.weight",
                                                    "c_proj.weight", "c_fc.weight")):
             assert torch.equal(p.detach(), exported[path]), path
-    leaks_ref = metrics["srspd"][dose_key]["leaks_per_matrix"]
+    if rule is None:
+        leaks_ref = metrics["srspd"][dose_key]["leaks_per_matrix"]
+    else:
+        key = "erank" if rule == "erank" else f"{float(rule):g}"
+        leaks_ref = metrics["srspd"][dose_key]["truncated"][key]["leaks"]
     assert set(leaks_ref) == set(rep.matrices)
     for n, lk in leaks_ref.items():
         for f in ("L_X_rel", "L_Y_rel"):
@@ -286,3 +310,47 @@ def test_reference_metrics_record_the_same_dose(ref, tmp_path, monkeypatch):
     d = srspd.dose_from_mu_per_token(MPT, metrics["n_X_target_tokens"],
                                      metrics["n_Y_retain_tokens"]).as_dict()
     assert d["mu"] == e["mu"] and json.dumps(d)
+
+
+RULES = [0.01, "erank"]
+
+
+def _compare_every_rule(model, mdir, metrics, rep, dose_key, pristine, n_matrices):
+    for rule in [None] + RULES:
+        rep.apply_dose(MPT, rule)
+        assert rep.rank_rule == rule
+        assert _compare(model, _exported(mdir, rule), metrics, rep, dose_key, pristine,
+                        rule) == n_matrices, rule
+        if rule is not None:                       # a real truncation, not full rank again
+            assert all(r["rank"] is not None for r in rep.matrices.values())
+            assert any(r["rank"] < r["rank_bound"] for r in rep.matrices.values()), rule
+
+
+def test_tiny_mistral_rank_rule_list_matches_the_reference_driver(ref, tmp_path, monkeypatch):
+    metrics, seen, mdir = _run_mistral(ref, tmp_path, monkeypatch, "readout", MPT, RULES)
+    (dose_key,) = metrics["srspd"]
+    assert set(metrics["srspd"][dose_key]["truncated"]) == {"0.01", "erank"}
+    model = _mistral(torch.bfloat16)
+    pristine = {n: p.detach().clone() for n, p in model.named_parameters()}
+    passes = []
+    rep = srspd.erase(model, target=seen["target"], retained=seen["retained"],
+                      mu_per_token=MPT, solver="readout", ridge_rel=1e-10, rank_rule=RULES,
+                      apply=False, gram_budget_gib=20000 / 2 ** 30,
+                      progress=lambda e, i: passes.append(e) if e == "plan" else None)
+    assert passes == ["plan"] and len(rep.pass_plan) > 1 and rep.rank_rules == RULES
+    _compare_every_rule(model, mdir, metrics, rep, dose_key, pristine, 14)
+    rep.close()
+    assert all(torch.equal(p.detach(), pristine[n]) for n, p in model.named_parameters())
+
+
+def test_tiny_gpt2_rank_rule_list_matches_the_reference_driver(ref, tmp_path, monkeypatch):
+    metrics, seen, mdir, ckpt = _run_gpt2(ref, tmp_path, monkeypatch, "readout", MPT, RULES)
+    (dose_key,) = metrics["srspd"]
+    assert set(metrics["srspd"][dose_key]["truncated"]) == {"0.01", "erank"}
+    model = transformers.GPT2LMHeadModel.from_pretrained(ckpt).eval()
+    pristine = {n: p.detach().clone() for n, p in model.named_parameters()}
+    rep = srspd.erase(model, target=seen["target"], retained=seen["retained"],
+                      mu_per_token=MPT, solver="readout", ridge_rel=1e-10, rank_rule=RULES,
+                      apply=False)
+    _compare_every_rule(model, mdir, metrics, rep, dose_key, pristine, 12)
+    rep.close()

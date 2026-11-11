@@ -67,3 +67,23 @@ def test_erase_then_report(capsys, ckpt, tmp_path):
 def test_errors_are_json(capsys, tmp_path):
     code, out = _run(capsys, ["report", str(tmp_path / "missing.json")])
     assert code == 2 and out["type"] == "FileNotFoundError"
+
+
+def test_erase_with_repeated_rank_rules(capsys, ckpt, tmp_path):
+    tgt = tmp_path / "t.txt"
+    ret = tmp_path / "r.txt"
+    tgt.write_text("\n".join(" ".join(f"w{(i * 5 + j) % 60}" for j in range(20))
+                             for i in range(3)))
+    ret.write_text("\n".join(" ".join(f"w{60 + (i * 3 + j) % 60}" for j in range(30))
+                             for i in range(6)))
+    base = ["erase", str(ckpt), "--target", str(tgt), "--retained", str(ret),
+            "--mu-per-token", "1.0", "--dtype", "float32",
+            "--rank-rule", "0.1", "--rank-rule", "erank"]
+    code, out = _run(capsys, base)
+    assert code == 2 and "apply_rank_rule" in out["error"]
+    code, rep = _run(capsys, base + ["--apply-rank-rule", "erank"])
+    assert code == 0 and rep["applied"] and rep["rank_rule"] == "erank"
+    assert rep["rank_rules"] == [0.1, "erank"] and len(rep["settings"]) == 3
+    assert set(rep["by_dose"]["1.0"]["truncated"]) == {"0.1", "erank"}
+    code, rep = _run(capsys, base + ["--apply-rank-rule", "full"])
+    assert code == 0 and rep["applied"] and rep["rank_rule"] is None
