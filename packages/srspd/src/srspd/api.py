@@ -1,0 +1,513 @@
+"""The one-call entry point: :func:`erase` on a resident HF model, :func:`restore`.
+
+Design (agent-facing)
+---------------------
+``erase`` SOLVES at every requested dose and APPLIES exactly one:
+
+* ``mu_per_token`` a number -> that dose is solved and applied;
+* ``mu_per_token`` a list -> every dose is solved (one set of Gram passes);
+  pass ``apply_mu_per_token=<one of them>`` to apply it, or ``apply=False`` to
+  apply none. The returned :class:`EditReport` carries the leaks of every
+  dose (``by_dose``), so a caller can pick one afterwards and call
+  ``report.apply_dose(m)``, which restores the pristine weights and applies
+  dose ``m`` -- no second pass over the data.
+
+The model is edited in place (``W_new = W - M`` for every selected matrix);
+:func:`restore` puts every edited weight back bit for bit. A model that
+carries an applied erasure is refused by ``erase`` until it is restored, so a
+second solve never starts from edited weights.
+
+``target`` and ``retained`` are token ids -- a ``LongTensor`` (``[T]`` one
+sequence, ``[B, T]`` B sequences), a list of 1-D tensors / int lists, or (with
+``tokenizer``) strings. Each sequence is its own forward pass (no padding).
+``X`` is every token of ``target``, ``Y`` every token of ``retained``;
+``n_x`` / ``n_y`` are their token counts and the dose is resolved with
+:func:`srspd.dose_from_mu_per_token`.
+"""
+from __future__ import annotations
+
+import json
+import math
+import os
+import shutil
+import tempfile
+import weakref
+from dataclasses import dataclass, field
+from typing import Any, Callable
+
+import torch
+
+from .capture.grams import MemorySpill, TensorSpill, gram_bytes
+from .capture.hf import harvest_inputs_concat
+from .dose import dose_from_mu_per_token
+from .models.harness import HFLinearHarness, group_by_input
+from .models.pristine import PristineStore
+from .models.quirks import detect_quirks
+from .models.selector import resolve_selector
+from .pipeline import (CONVENTION, SOLVERS, LEAK_FIELDS, SolveState, apply_dose,
+                       check_scratch_space, leaks_per_matrix, rank_rule_spec, run_gram_passes,
+                       scratch_bytes_needed, summarize_by_type)
+
+__all__ = ["erase", "restore", "EditReport"]
+
+_SESSIONS: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+
+#: Per-matrix fields an :class:`EditReport` carries for the applied setting.
+MATRIX_FIELDS = ("input_key", "d_out", "d_in", "L_X_rel", "L_Y_rel", "erased_rel",
+                 "retained_rel", "delta_fro", "w_fro", "rank", "rank_bound", "solve_path",
+                 "ridge_delta", "erank")
+
+
+def _noop(_event, _info):
+    return None
+
+
+# --------------------------------------------------------------------------- #
+# inputs                                                                       #
+# --------------------------------------------------------------------------- #
+def _encode(tokenizer, text, what):
+    if tokenizer is None:
+        raise TypeError(f"{what} holds text; pass tokenizer= or give token ids")
+    ids = tokenizer(text)["input_ids"]
+    return torch.as_tensor(ids, dtype=torch.long)
+
+
+def as_sequences(x, tokenizer=None, what="target") -> list:
+    """Normalise ``target`` / ``retained`` into a list of ``[1, T]`` LongTensors (CPU)."""
+    if isinstance(x, str):
+        seqs = [_encode(tokenizer, x, what)]
+    elif isinstance(x, torch.Tensor):
+        if x.dim() == 1:
+            seqs = [x]
+        elif x.dim() == 2:
+            seqs = list(x)
+        else:
+            raise ValueError(f"{what} tensor must be [T] or [B, T], got {tuple(x.shape)}")
+    elif isinstance(x, (list, tuple)):
+        if x and all(isinstance(v, int) and not isinstance(v, bool) for v in x):
+            seqs = [torch.as_tensor(list(x), dtype=torch.long)]
+        else:
+            seqs = []
+            for v in x:
+                if isinstance(v, str):
+                    seqs.append(_encode(tokenizer, v, what))
+                elif isinstance(v, torch.Tensor):
+                    if v.dim() == 2 and v.shape[0] == 1:
+                        v = v[0]
+                    if v.dim() != 1:
+                        raise ValueError(f"each {what} sequence must be [T] or [1, T], got "
+                                         f"{tuple(v.shape)}")
+                    seqs.append(v)
+                else:
+                    seqs.append(torch.as_tensor(list(v), dtype=torch.long))
+    else:
+        raise TypeError(f"{what} must be token ids (tensor / list of sequences) or text, got "
+                        f"{type(x).__name__}")
+    out = []
+    for i, s in enumerate(seqs):
+        s = torch.as_tensor(s).to("cpu")
+        if s.dtype not in (torch.int64, torch.int32, torch.int16, torch.uint8):
+            raise TypeError(f"{what} sequence {i} has dtype {s.dtype}; token ids are integers")
+        if s.numel() == 0:
+            raise ValueError(f"{what} sequence {i} is empty")
+        out.append(s.to(torch.long).reshape(1, -1))
+    if not out:
+        raise ValueError(f"{what} holds no sequences")
+    return out
+
+
+def _input_device(model):
+    try:
+        return model.get_input_embeddings().weight.device
+    except Exception:
+        return next(model.parameters()).device
+
+
+def _doses(mu_per_token, n_x, n_y):
+    vals = list(mu_per_token) if isinstance(mu_per_token, (list, tuple)) else [mu_per_token]
+    if not vals:
+        raise ValueError("mu_per_token is empty")
+    seen, out = set(), []
+    for v in vals:
+        d = dose_from_mu_per_token(v, n_x, n_y)
+        if d.mu_per_token not in seen:
+            seen.add(d.mu_per_token)
+            out.append(d)
+    return out
+
+
+def _auto_budget(device_of_key, d_in_of, bytes_per_elem):
+    """Default per-device Gram budget: every Gram at once on CPU; on CUDA half of
+    the smallest free memory over the devices holding Grams."""
+    devs = {torch.device(str(d)) for d in device_of_key.values()}
+    cuda = [d for d in devs if d.type == "cuda"]
+    if not cuda:
+        return sum(gram_bytes(d, bytes_per_elem) for d in d_in_of.values())
+    return int(0.5 * min(torch.cuda.mem_get_info(d)[0] for d in cuda))
+
+
+def _dose_key(dose):
+    return repr(float(dose.mu_per_token))
+
+
+# --------------------------------------------------------------------------- #
+# report                                                                       #
+# --------------------------------------------------------------------------- #
+@dataclass
+class EditReport:
+    """The record of one :func:`erase` call (JSON via :meth:`to_dict` / :meth:`to_json`).
+
+    Fields
+    ------
+    convention : the edit convention (``W_new = W - M``; X target, Y retained).
+    solver : ``"readout"`` | ``"grams"``.
+    applied : whether an edit is currently applied by this report.
+    dose : the applied dose, :meth:`srspd.dose.Dose.as_dict` (``mu_per_token``,
+        the derived weights, ``n_x``, ``n_y``, ``formula``), or ``None``.
+    doses : every solved dose, same form.
+    rank_rule : the truncation rule of the applied edit (``None`` = full rank).
+    ridge_rel : the requested relative ridge (the delta actually applied is per
+        matrix, ``matrices[name]["ridge_delta"]``).
+    n_x, n_y : target / retained token counts.
+    matrices : ``{name: {input_key, d_out, d_in, L_X_rel, L_Y_rel, erased_rel,
+        retained_rel, delta_fro (||M||_F), w_fro, rank (None = full),
+        rank_bound, solve_path ("cholesky" | "eigh"), ridge_delta, erank,
+        edit_fro (||W_new - W||_F as written), survival}}`` at the applied dose.
+    leaks_by_type : ``{matrix type: {L_X_rel: {median, min, max}, ...}}``.
+    by_dose : ``{repr(mu_per_token): {"dose", "leaks", "leaks_by_type",
+        "truncated"}}`` for every solved dose.
+    edit : ``{survival, rel_err, delta_fro_sum, by_type}`` of the applied edit.
+    input_keys : ``{key: {members, d_in, gram_bytes}}``.
+    quirks : ``{quirk name: detail}`` (:mod:`srspd.models.quirks`).
+    selector, pass_plan, specificity, stats, warnings.
+    """
+    convention: str
+    solver: str
+    applied: bool
+    dose: dict | None
+    doses: list
+    rank_rule: Any
+    ridge_rel: float
+    n_x: int
+    n_y: int
+    matrices: dict
+    leaks_by_type: dict
+    by_dose: dict
+    edit: dict | None
+    input_keys: dict
+    quirks: dict
+    selector: dict
+    pass_plan: list
+    specificity: dict
+    stats: dict
+    warnings: list
+    _session: Any = field(default=None, repr=False, compare=False)
+
+    def to_dict(self) -> dict:
+        d = {k: getattr(self, k) for k in self.__dataclass_fields__ if not k.startswith("_")}
+        return json.loads(json.dumps(d, default=_json_default))
+
+    def to_json(self, path=None, **kw) -> str:
+        kw.setdefault("indent", 1)
+        s = json.dumps(self.to_dict(), **kw)
+        if path is not None:
+            with open(path, "w") as f:
+                f.write(s)
+        return s
+
+    # -- live operations (need the session; not serialised) -------------------
+    def _need_session(self):
+        if self._session is None or self._session.closed:
+            raise RuntimeError("this EditReport has no live solve attached (it was loaded "
+                               "from JSON or closed); re-run srspd.erase")
+        return self._session
+
+    def apply_dose(self, mu_per_token) -> "EditReport":
+        """Restore the pristine weights and apply the solved dose ``mu_per_token``
+        (one of :attr:`doses`). Updates this report in place and returns it."""
+        s = self._need_session()
+        idx = [i for i, d in enumerate(s.state.doses) if d.mu_per_token == float(mu_per_token)]
+        if not idx:
+            raise ValueError(f"mu_per_token {mu_per_token!r} was not solved; solved: "
+                             f"{[d.mu_per_token for d in s.state.doses]}")
+        s.store.restore_all()
+        _apply_into(self, s, idx[0])
+        return self
+
+    def restore(self) -> list:
+        """Restore every edited weight bit for bit (:func:`restore`)."""
+        s = self._need_session()
+        names = s.store.restore_all()
+        s.mark_restored()
+        return names
+
+    def close(self) -> None:
+        """Restore the model, then free the solve's spills (and its scratch
+        directory). The report keeps its numbers; :meth:`apply_dose` stops working."""
+        s = self._session
+        if s is None or s.closed:
+            return
+        s.store.restore_all()
+        self.applied, self.dose, self.edit = False, None, None
+        s.close()
+
+
+def _json_default(o):
+    if isinstance(o, torch.Tensor):
+        return o.tolist()
+    if isinstance(o, (torch.dtype, torch.device)):
+        return str(o)
+    if hasattr(o, "as_dict"):
+        return o.as_dict()
+    return str(o)
+
+
+class _Session:
+    def __init__(self, model, h, store, state, lam_index_of, scratch, own_scratch):
+        self.model_ref = weakref.ref(model)
+        self.h, self.store, self.state = h, store, state
+        self.lam_index_of = lam_index_of           # dose index -> lam index (or None)
+        self.scratch, self.own_scratch = scratch, own_scratch
+        self.closed = False
+        self.report_ref = None
+
+    def mark_restored(self):
+        r = self.report_ref() if self.report_ref is not None else None
+        if r is not None:
+            r.applied, r.dose, r.edit = False, None, None
+
+    def close(self):
+        self.state.readouts = self.state.lam_spill = self.state.component_spill = None
+        self.state.X_of = None
+        if self.own_scratch and self.scratch and os.path.isdir(self.scratch):
+            shutil.rmtree(self.scratch, ignore_errors=True)
+        self.closed = True
+        m = self.model_ref()
+        if m is not None and _SESSIONS.get(m) is self:
+            del _SESSIONS[m]
+
+
+def _matrix_rows(state, di, li, edit):
+    src = state.diag_by_dose[di] if li is None else state.lam_info[li]
+    out = {}
+    for n, d in src.items():
+        row = {f: d.get(f) for f in MATRIX_FIELDS}
+        if li is not None:
+            row["rank_bound"] = d.get("k")
+        if edit is not None and n in edit["per_matrix"]:
+            row.update(edit_fro=edit["per_matrix"][n]["edit_fro"],
+                       survival=edit["per_matrix"][n]["survival"])
+        out[n] = row
+    return out
+
+
+def _apply_into(report, s, di):
+    li = s.lam_index_of.get(di)
+    edit = apply_dose(s.h, s.store, s.state, di, lam_index=li)
+    report.matrices = _matrix_rows(s.state, di, li, edit)
+    report.leaks_by_type = summarize_by_type(report.matrices, LEAK_FIELDS)
+    report.edit = {k: v for k, v in edit.items() if k != "per_matrix"}
+    report.dose = s.state.doses[di].as_dict()
+    report.applied = True
+
+
+# --------------------------------------------------------------------------- #
+# erase / restore                                                              #
+# --------------------------------------------------------------------------- #
+def erase(model, tokenizer=None, *, target, retained, mu_per_token, apply=True,
+          apply_mu_per_token=None, layers=None, solver="readout", rank_rule=None,
+          ridge_rel=0.0, device=None, gram_budget_gib=None, scratch_dir=None,
+          progress: Callable | None = None, subtract_bias=False, resume_from_cache=True,
+          eig_extremes=True, lam_svd_dtype="float32", check_bracketing=True) -> EditReport:
+    """Erase the ``target`` behaviour from ``model`` while preserving
+    ``retained``: for every selected linear weight ``W``,
+    ``W_new = W - M``, ``M = W X^T X (X^T X + mu Y^T Y + delta I)^+``.
+
+    Parameters
+    ----------
+    model : a resident HF model (``eval()``; any device / dtype). Edited in place.
+    tokenizer : only needed when ``target`` / ``retained`` are text.
+    target, retained : token ids (see the module docstring); ``X`` and ``Y``.
+    mu_per_token : the dose, a number > 0 or a list of them (``1 / mu_per_token``
+        is the per-token Lagrange multiplier on the retained disturbance; larger
+        erases more). See :mod:`srspd.dose`.
+    apply, apply_mu_per_token : which solved dose to apply (module docstring).
+    layers : the layer selector (``None`` = auto preset; see
+        :func:`srspd.models.selector.resolve_selector`).
+    solver : ``"readout"`` (target held as activations; supports ``rank_rule``)
+        or ``"grams"`` (target streamed into ``G_X``; for a target too large to
+        hold).
+    rank_rule : ``None`` (full rank), a ``lam_rel`` in (0, 1) or ``"erank"``:
+        the applied edit is then ``W - M_r`` (COALA projector on ``M`` over
+        ``X``); ``readout`` only.
+    ridge_rel : relative ridge, ``delta = ridge_rel * max(diag(mu G_Y))``
+        (escalated automatically when ``G_mu`` is not numerically PD; the delta
+        used is reported per matrix).
+    device : where the Grams and solves live (default: each weight's device).
+    gram_budget_gib : float64 Gram budget per device; default every Gram at
+        once on CPU, half the free memory on CUDA. More passes when exceeded.
+    scratch_dir : spill pristine weights, readouts and components to a fresh
+        subdirectory here instead of host RAM (removed by
+        :meth:`EditReport.close`).
+    progress : ``progress(event: str, info: dict)``, called on ``"plan"``,
+        ``"pass_start"``, ``"chunk"``, ``"solve"``, ``"pass_done"``,
+        ``"warning"``, ``"applied"``.
+    subtract_bias : accept biased ``nn.Linear`` projections (quirk
+        ``biased_projection``).
+    resume_from_cache : restart each Gram pass from the cached residual stream
+        (bitwise-guarded; off automatically on KV-shared models).
+    eig_extremes : record ``lam_min`` / ``lam_max`` of every ``G_Y``.
+    lam_svd_dtype : dtype of the SVD of ``M X^T`` behind ``rank_rule``.
+    check_bracketing : verify on the first target sequence that every hook
+        brackets exactly ``x W^T`` (rel. tol 1e-2).
+
+    Returns
+    -------
+    :class:`EditReport`.
+    """
+    progress = progress or _noop
+    if solver not in SOLVERS:
+        raise ValueError(f"solver must be one of {SOLVERS}, got {solver!r}")
+    prev = _SESSIONS.get(model)
+    if prev is not None and not prev.closed and prev.store.is_edited:
+        raise RuntimeError("this model carries an applied erasure: call srspd.restore(model) "
+                           "first so the solve starts from the pristine weights")
+    rules = [] if rank_rule is None else [rank_rule_spec(rank_rule)]
+    if rules and solver == "grams":
+        raise ValueError("rank_rule needs solver='readout': truncation acts on the target "
+                         "response M X^T, which the grams solver never forms")
+    sel = resolve_selector(model, layers)
+    h = HFLinearHarness(model, selector=sel, subtract_bias=subtract_bias)
+    quirks = detect_quirks(model, h)
+    in_dev = _input_device(model)
+    tgt = as_sequences(target, tokenizer, "target")
+    ret = as_sequences(retained, tokenizer, "retained")
+    n_x = sum(int(s.shape[-1]) for s in tgt)
+    n_y = sum(int(s.shape[-1]) for s in ret)
+    doses = _doses(mu_per_token, n_x, n_y)
+    if apply:
+        if apply_mu_per_token is None:
+            if len(doses) > 1:
+                raise ValueError(f"{len(doses)} doses solved; pass apply_mu_per_token=<one of "
+                                 f"{[d.mu_per_token for d in doses]}> or apply=False (then "
+                                 f"report.apply_dose(m))")
+            apply_index = 0
+        else:
+            m = float(apply_mu_per_token)
+            hits = [i for i, d in enumerate(doses) if d.mu_per_token == m]
+            if not hits:
+                raise ValueError(f"apply_mu_per_token {apply_mu_per_token!r} is not one of the "
+                                 f"doses {[d.mu_per_token for d in doses]}")
+            apply_index = hits[0]
+    if check_bracketing:
+        probe = tgt[0][:, :64].to(in_dev)
+        h.verify_bracketing(h.harvest([probe]), "probe", rel_tol=1e-2)
+
+    key_members = group_by_input(h.all_names)
+    keys = list(key_members)
+    rep = {k: m[0] for k, m in key_members.items()}
+    d_in_of = {k: h.d_in(rep[k]) for k in keys}
+    device_of_key = {k: (torch.device(device) if device is not None
+                         else h.get_weight(rep[k]).device) for k in keys}
+    grams_mode = solver == "grams"
+    budget = (int(float(gram_budget_gib) * 2 ** 30) if gram_budget_gib is not None
+              else _auto_budget(device_of_key, d_in_of, 16 if grams_mode else 8))
+
+    scratch, own = None, False
+    if scratch_dir is not None:
+        os.makedirs(str(scratch_dir), exist_ok=True)
+        params = {n: h.get_weight(n).numel() for n in h.all_names}
+        elem = h.get_weight(h.all_names[0]).element_size()
+        need = scratch_bytes_needed(params, n_lam=len(rules) * len(doses), elem_bytes=elem,
+                                    n_dense=len(doses) if grams_mode else 0)
+        if not grams_mode:
+            need += len(doses) * sum(4 * n_x * d_in_of[k] for k in keys)
+        check_scratch_space(str(scratch_dir), need)
+        scratch, own = tempfile.mkdtemp(prefix="srspd-", dir=str(scratch_dir)), True
+
+    def spill(sub):
+        return MemorySpill() if scratch is None else TensorSpill(os.path.join(scratch, sub))
+
+    X_of = {}
+    if not grams_mode:
+        data, n_h = harvest_inputs_concat(h, [s.to(in_dev) for s in tgt])
+        assert n_h == n_x
+        X_of = {k: data[rep[k]] for k in keys}
+        del data
+    lam_settings = [{"dose_index": di, "rule": r} for di in range(len(doses)) for r in rules]
+    state = SolveState(solver=solver, doses=doses, lam_settings=lam_settings,
+                       key_members=key_members, X_of=X_of, readouts=spill("readouts"),
+                       lam_spill=spill("truncated"), component_spill=spill("components"))
+
+    def retained_iter():
+        for s in ret:
+            yield s.to(in_dev)
+
+    def target_iter():
+        for s in tgt:
+            yield s.to(in_dev)
+
+    run_gram_passes(h, state, retained=retained_iter, n_y=n_y, keys=keys, rep=rep,
+                    d_in_of=d_in_of, device_of_key=device_of_key, gram_budget_bytes=budget,
+                    resume_from_cache=resume_from_cache, eig_extremes=eig_extremes,
+                    ridge_rel=ridge_rel, lam_svd_dtype=lam_svd_dtype,
+                    target=target_iter if grams_mode else None, n_x=n_x, progress=progress)
+
+    store = PristineStore(h, scratch)
+    lam_index_of = {ls["dose_index"]: li for li, ls in enumerate(lam_settings)}
+    session = _Session(model, h, store, state, lam_index_of, scratch, own)
+    _SESSIONS[model] = session
+
+    by_dose = {}
+    for di, d in enumerate(doses):
+        diags = state.diag_by_dose[di]
+        ent = {"dose": d.as_dict(), "leaks": leaks_per_matrix(diags),
+               "leaks_by_type": summarize_by_type(diags, LEAK_FIELDS + ("delta_fro",)),
+               "truncated": {}}
+        li = lam_index_of.get(di)
+        if li is not None:
+            info = state.lam_info[li]
+            ent["truncated"][str(lam_settings[li]["rule"])] = {
+                "leaks": leaks_per_matrix(info),
+                "leaks_by_type": summarize_by_type(info, LEAK_FIELDS + ("delta_fro",)),
+                "rank_by_type": summarize_by_type(info, ("rank", "k", "r_frac", "erank"))}
+        by_dose[_dose_key(d)] = ent
+
+    report = EditReport(
+        convention=CONVENTION, solver=solver, applied=False, dose=None,
+        doses=[d.as_dict() for d in doses], rank_rule=(rules[0] if rules else None),
+        ridge_rel=float(ridge_rel), n_x=n_x, n_y=n_y, matrices={}, leaks_by_type={},
+        by_dose=by_dose, edit=None,
+        input_keys={k: {"members": list(m), "d_in": d_in_of[k],
+                        "gram_bytes": gram_bytes(d_in_of[k]) * (2 if grams_mode else 1),
+                        "device": str(device_of_key[k])} for k, m in key_members.items()},
+        quirks=quirks, selector=sel.as_dict(), pass_plan=state.pass_plan,
+        specificity=state.specificity,
+        stats={**state.stats, "gram_budget_bytes": int(budget),
+               "n_target_sequences": len(tgt), "n_retained_sequences": len(ret),
+               "scratch_dir": scratch},
+        warnings=list(state.warnings), _session=session)
+    session.report_ref = weakref.ref(report)
+    if apply:
+        _apply_into(report, session, apply_index)
+        progress("applied", {"mu_per_token": doses[apply_index].mu_per_token,
+                             "survival": report.edit["survival"]})
+    else:
+        report.matrices = _matrix_rows(state, 0, lam_index_of.get(0), None)
+        report.leaks_by_type = summarize_by_type(report.matrices, LEAK_FIELDS)
+    bad = [n for n, r in report.matrices.items()
+           if any(r.get(f) is None or not math.isfinite(float(r[f])) for f in LEAK_FIELDS)]
+    if bad:
+        report.warnings.append(f"non-finite leaks for {bad[:6]}")
+    return report
+
+
+def restore(model) -> list:
+    """Restore every weight :func:`erase` edited on ``model``, bit for bit.
+    Returns the restored matrix names (``[]`` if nothing is applied)."""
+    s = _SESSIONS.get(model)
+    if s is None or s.closed:
+        return []
+    names = s.store.restore_all()
+    s.mark_restored()
+    return names

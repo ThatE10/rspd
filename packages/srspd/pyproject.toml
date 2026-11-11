@@ -14,6 +14,9 @@ dependencies = ["torch>=2.0"]
 hf = ["transformers", "safetensors"]
 test = ["pytest", "numpy"]
 
+[project.scripts]
+srspd = "srspd.cli:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

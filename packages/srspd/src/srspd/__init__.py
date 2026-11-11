@@ -15,12 +15,23 @@ arXiv:2507.07580). Leaks ``L_X_rel = ||(W - M) X^T|| / ||W X^T||`` and
 Modules: :mod:`srspd.solve` (solve, truncation, edit, leaks, specificity),
 :mod:`srspd.coala` (the COALA projector and compression), :mod:`srspd.dose`,
 :mod:`srspd.erank`, :mod:`srspd.report` (edit-size report).
+
+On a resident HF model: :func:`erase` (harvest, Gram passes, solve at every
+requested ``mu_per_token``, apply ``W - M`` to every selected matrix, leaks per
+matrix -> :class:`EditReport`), :func:`restore` (bit-for-bit), and
+:func:`inspect_model` (what would be edited, input keys, Gram bytes, quirks).
+Subpackages :mod:`srspd.models` (selector, quirks, harness, export) and
+:mod:`srspd.capture` (activation sources, Gram sinks). Only ``torch`` is
+needed to import the package; ``transformers`` / ``safetensors`` (the ``[hf]``
+extra) are imported where used. Command line: ``srspd inspect | erase | report``.
 """
 from __future__ import annotations
 
 from .coala import compress_weight, fit_coala
 from .dose import Dose, dose_from_mu_per_token, erased_fraction, suggest_mu_per_token
 from .erank import effective_rank
+from .api import EditReport, erase, restore
+from .models.inspect import inspect_model
 from .solve import (CORE_TABLE, ErasedComponent, ErasureConventionError, KeptMap,
                     apply_erasure, erased_component, erased_component_gram,
                     erased_component_grams, factor_grams, leaks, leaks_gram, leaks_grams,
@@ -33,5 +44,6 @@ __all__ = [
     "factor_grams", "truncate_component", "apply_erasure", "leaks", "leaks_gram",
     "leaks_grams", "specificity", "ErasedComponent", "KeptMap", "ErasureConventionError",
     "CORE_TABLE", "fit_coala", "compress_weight", "Dose", "dose_from_mu_per_token",
-    "suggest_mu_per_token", "erased_fraction", "effective_rank", "__version__",
+    "suggest_mu_per_token", "erased_fraction", "effective_rank", "erase", "restore",
+    "inspect_model", "EditReport", "__version__",
 ]

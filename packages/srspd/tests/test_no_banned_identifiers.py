@@ -32,7 +32,11 @@ def _files():
 
 def test_files_found():
     names = {p.name for p in _files()}
-    assert {"solve.py", "coala.py", "dose.py", "__init__.py"} <= names
+    assert {"solve.py", "coala.py", "dose.py", "__init__.py", "api.py", "pipeline.py", "cli.py",
+            "selector.py", "quirks.py", "harness.py", "inspect.py", "pristine.py", "export.py",
+            "base.py", "hf.py", "grams.py"} <= names
+    subpackages = {p.parent.name for p in _files() if p.parent != SRC and SRC in p.parents}
+    assert {"models", "capture"} <= subpackages
 
 
 def test_no_banned_words():
