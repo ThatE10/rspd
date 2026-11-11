@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "srspd-experiments"
+version = "0.0.1"
+description = "Data builders, evaluation harness, baselines and reproduction recipes for srspd."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["srspd[hf]", "datasets", "pyyaml", "numpy"]
+
+[project.optional-dependencies]
+eval = ["lm_eval==0.4.12", "vllm==0.26.0"]
+muse = ["rouge_score", "scikit-learn", "scipy"]
+test = ["pytest"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"srspd_experiments.data" = ["specs/*.yaml"]
+"srspd_experiments.eval" = ["tasks/*.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
