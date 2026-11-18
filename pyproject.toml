@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rspd"
+version = "0.0.1"
+description = "Closed-form selective erasure of behaviour from a model's linear layers, by subtraction."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["torch>=2.0"]
+
+[project.optional-dependencies]
+hf = ["transformers", "safetensors"]
+experiments = ["transformers", "safetensors", "accelerate", "datasets", "pyyaml", "numpy"]
+eval = ["lm_eval==0.4.12", "vllm==0.26.0"]
+muse = ["rouge_score", "scikit-learn", "scipy"]
+test = ["pytest", "numpy"]
+
+[project.scripts]
+rspd = "rspd.cli:main"
+rspd-exp = "rspd.experiments.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"rspd.experiments.data" = ["specs/*.yaml"]
+"rspd.experiments.eval" = ["tasks/*.yaml"]
+"rspd.experiments.recipes" = ["*.yaml", "hf_weights.csv"]

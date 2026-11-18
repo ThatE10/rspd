@@ -1,14 +1,14 @@
 # API reference
 
-Every public symbol of `srspd` (`srspd.__all__`, `srspd.models.__all__`,
-`srspd.capture.__all__`), the `srspd` and `srspd-exp` command lines, and the package-level
-API of `srspd-experiments`. Hand-written; `packages/srspd/tests/test_docs_core.py` and
-`packages/srspd-experiments/tests/test_docs_experiments.py` fail when a public symbol, a
+Every public symbol of `rspd` (`rspd.__all__`, `rspd.models.__all__`,
+`rspd.capture.__all__`), the `rspd` and `rspd-exp` command lines, and the package-level
+API of `rspd[experiments]`. Hand-written; `tests/test_docs_core.py` and
+`tests/experiments/test_docs_experiments.py` fail when a public symbol, a
 subcommand or an option is missing here. Conventions throughout: `X` target, `Y` retained,
 batch-first `[n, d_in]`; `W [d_out, d_in]`; the edit is `W − M`; the dose is `mu_per_token`.
 Math: `docs/math.md`. Workflow: `AGENTS.md`.
 
-## `srspd` — model-level
+## `rspd` — model-level
 
 | symbol | semantics |
 | --- | --- |
@@ -16,9 +16,9 @@ Math: `docs/math.md`. Workflow: `AGENTS.md`.
 | `restore(model) -> list` | Put every weight `erase` edited on `model` back bit for bit, whichever report applied the edit, and release the model's edit lock; returns the restored names (`[]` if nothing applied). |
 | `inspect_model(model_or_id, layers=None, *, subtract_bias=False, gram_budget_gib=None, trust_remote_code=False) -> dict` | What `erase` would edit: selector, matrices (shape, dtype, input key), input keys with Gram bytes per solver, totals, quirks, warnings; `pass_plan` with a budget. A hub id / local dir is built on the `meta` device (no weights). |
 | `EditReport` | Dataclass returned by `erase`; fields in `AGENTS.md` ("Read the report"); `matrices` in block, then forward order; `non_pd` lists every non-PD solve (one summary warning per run). Methods: `apply_dose(mu_per_token, rule=None)` restores then applies a solved setting and returns the report (refuses, naming the holder, while another report's edit is applied: the edit lock belongs to the model); `restore()` (also releases the lock); `close()` restores the model and frees the solve; `spectrum(name) -> list` the full `γ` of an input key or matrix (needs `spectrum="full"`); `to_dict()`; `to_json(path=None, **json_kw) -> str`. |
-| `export_checkpoint(model, tokenizer, out_dir, *, source=None, token=None) -> dict` | Re-export of `srspd.models.export.export_checkpoint` (below). |
+| `export_checkpoint(model, tokenizer, out_dir, *, source=None, token=None) -> dict` | Re-export of `rspd.models.export.export_checkpoint` (below). |
 
-## `srspd` — tensors
+## `rspd` — tensors
 
 | symbol | semantics |
 | --- | --- |
@@ -46,19 +46,19 @@ Math: `docs/math.md`. Workflow: `AGENTS.md`.
 | `effective_rank(A) -> float` | Roy–Vetterli effective rank of a matrix or a 1-D singular spectrum. |
 | `__version__` | Package version string. |
 
-## `srspd.models`
+## `rspd.models`
 
 | symbol | semantics |
 | --- | --- |
-| `HFLinearHarness(model, layers_regex=None, exclude_regex=None, *, subtract_bias=False, expect_d_in=None, selector=None)` | The selected projections by name (`module_by_name`, `path_by_name`, `all_names`); `get_weight(name)` as `[d_out, d_in]`. Used with `srspd.capture.harvest_inputs_concat`. |
+| `HFLinearHarness(model, layers_regex=None, exclude_regex=None, *, subtract_bias=False, expect_d_in=None, selector=None)` | The selected projections by name (`module_by_name`, `path_by_name`, `all_names`); `get_weight(name)` as `[d_out, d_in]`. Used with `rspd.capture.harvest_inputs_concat`. |
 | `as_dout_din(mod) -> Tensor` | A projection's weight as `[d_out, d_in]` (transposes `Conv1D`). |
 | `write_dout_din(mod, value)` | Write a `[d_out, d_in]` matrix into the module's native layout and dtype. |
 | `is_conv1d(mod) -> bool` | Whether `mod` is a `transformers` `Conv1D`. |
 | `input_key(name) -> str` | Matrix name to its input key (`L05.self_attn.q_proj` -> `L05.attn_in`). |
 | `key_layer(key) -> int` | Block index of an input key (`-1` if none). |
 | `group_by_input(names) -> dict` | `{input key: [member names]}`. |
-| `inspect_model(...)` | As `srspd.inspect_model`. |
-| `export_checkpoint(...)` | `srspd.models.export.export_checkpoint` (below); also `srspd.export_checkpoint`. |
+| `inspect_model(...)` | As `rspd.inspect_model`. |
+| `export_checkpoint(...)` | `rspd.models.export.export_checkpoint` (below); also `rspd.export_checkpoint`. |
 | `PristineStore(harness, scratch_dir=None)` | RAM- or disk-backed pristine weights: `write(name, value)`, `pristine(name)`, `restore_all()`, `is_edited`. |
 | `QUIRKS` | Registry `{name: Quirk}`: `conv1d_transposed`, `biased_projection`, `multimodal_towers`, `kv_shared_layers`, `shared_input_check`, `bf16_edit_in_fp32`. |
 | `Quirk(name, description, detect, handled_by)` | One registry entry; `detect(model, harness)` returns a detail dict or `None`. |
@@ -69,14 +69,14 @@ Math: `docs/math.md`. Workflow: `AGENTS.md`.
 | `build_layers_regex(indices, base=DEFAULT_LAYERS_REGEX) -> str` | `base` narrowed to exactly these block indices. |
 | `resolve_selector(model, layers=None) -> LayerSelector` | The `layers=` argument (None, preset, regex, block list, mapping, selector) to a selector. |
 
-`srspd.models.export.export_checkpoint(model, tokenizer, out_dir, *, source=None, token=None) -> dict`
+`rspd.models.export.export_checkpoint(model, tokenizer, out_dir, *, source=None, token=None) -> dict`
 writes the model as it is now with `save_pretrained` (own dtype), the tokenizer, and the
 KV-shared tensor backfill from `source`; returns `{dir, bytes, wall_s, dtype,
-tokenizer_saved, kv_shared_backfilled, warnings}`. `srspd.report.weight_delta_report(base,
+tokenizer_saved, kv_shared_backfilled, warnings}`. `rspd.report.weight_delta_report(base,
 edited, ...)` compares two state dicts or modules (Frobenius change per tensor, block
 and type).
 
-## `srspd.capture`
+## `rspd.capture`
 
 | symbol | semantics |
 | --- | --- |
@@ -93,12 +93,12 @@ and type).
 | `harvest_inputs_concat(harness, ids_list, *, expect_dtype=None, names=None) -> (data, n_tokens)` | One forward per `[1, T]` sequence; `{name: X [n_tokens, d_in]}` on CPU, members of one key sharing one tensor. |
 | `harvest_inputs_native(harness, ids, names=None, *, expect_dtype=None) -> (data, report)` | One forward; the inputs each matrix received, plus a shared/mismatch report. |
 
-## `srspd` command line
+## `rspd` command line
 
 Every command prints one JSON document on stdout; on failure it prints
 `{"error": ..., "type": ...}` and exits with status 2.
 
-`srspd inspect MODEL` — `inspect_model` on a hub id or local dir (config only).
+`rspd inspect MODEL` — `inspect_model` on a hub id or local dir (config only).
 
 | option | meaning |
 | --- | --- |
@@ -106,7 +106,7 @@ Every command prints one JSON document on stdout; on failure it prints
 | `--subtract-bias` | accept biased `nn.Linear` projections |
 | `--gram-budget-gib G` | also plan the Gram passes under this per-device budget |
 
-`srspd erase MODEL --target FILE --retained FILE --mu-per-token M [M ...]` — load the model
+`rspd erase MODEL --target FILE --retained FILE --mu-per-token M [M ...]` — load the model
 and tokenizer, read one document per non-empty line, erase, print the report.
 
 | option | meaning |
@@ -130,26 +130,26 @@ and tokenizer, read one document per non-empty line, erase, print the report.
 | `--out DIR` | write the edited checkpoint and tokenizer here (KV-shared backfill from `MODEL`) |
 | `--report PATH` | also write the report JSON here |
 
-`srspd report PATH` — summarise a saved report: solver, dose, leaks by type, the worst
+`rspd report PATH` — summarise a saved report: solver, dose, leaks by type, the worst
 matrices by each leak, survival, quirks, warnings.
 
 | option | meaning |
 | --- | --- |
 | `--top N` | how many worst matrices to list per leak (default 5) |
 
-## `srspd-exp` command line
+## `rspd-exp` command line
 
-`srspd-exp list` — every shipped recipe, its export count, how many have published weights,
+`rspd-exp list` — every shipped recipe, its export count, how many have published weights,
 its TP and title.
 
-`srspd-exp show RESULT` — one recipe: model, TP, evaluation, hardware hints, and per export
+`rspd-exp show RESULT` — one recipe: model, TP, evaluation, hardware hints, and per export
 its method, `mu_per_token`, rank rule, weights and published numbers.
 
 | option | meaning |
 | --- | --- |
 | `--json` | print the loaded recipe as JSON (also for `compare`: the comparison as JSON) |
 
-`srspd-exp reproduce RESULT --mode cheap|full` — `cheap` downloads the published edited
+`rspd-exp reproduce RESULT --mode cheap|full` — `cheap` downloads the published edited
 weights and evaluates them; `full` re-runs each method runner, then evaluates.
 
 | option | meaning |
@@ -159,7 +159,7 @@ weights and evaluates them; `full` re-runs each method runner, then evaluates.
 | `--export ID` | restrict to this export (repeatable) |
 | `--authors-python PY` | interpreter carrying the authors' stack (KUDA's MUSE code) |
 
-`srspd-exp compare RESULT RESULTS_JSON` — check a results file against the recipe's
+`rspd-exp compare RESULT RESULTS_JSON` — check a results file against the recipe's
 published numbers; exit 0 only when every published number of the exports present passes
 within tolerance and every row's `tp` equals the recipe's `tensor_parallel_size`.
 
@@ -168,9 +168,9 @@ within tolerance and every row's `tp` equals the recipe's `tensor_parallel_size`
 | `--export ID` | read every row as this export (when the file's `model` field is a path) |
 | `--json` | the comparison as JSON |
 
-## `srspd_experiments` — package level
+## `rspd.experiments` — package level
 
-`srspd_experiments.data`:
+`rspd.experiments.data`:
 
 | symbol | semantics |
 | --- | --- |
@@ -178,19 +178,19 @@ within tolerance and every row's `tp` equals the recipe's `tensor_parallel_size`
 | `TargetSpec(corpora, max_rows=None, max_tokens=None, min_len=50, max_length=768, heldout_rows=8, heldout_from=None)` | The target set `X`. |
 | `RetainedSpec(buckets, chunk_tokens=1024, seed=0, add_bos=True, chat_template=None)` | The retained set `Y` (retained-corpus buckets). |
 | `HeldoutSpec(rows=32, max_length=1024, tail=(), min_len=0)` | The shared baseline held-out readout. |
-| `ErasureData(target_ids, retained_ids, heldout_ids, manifest)` | Token ids ready for `srspd.erase`, plus the data manifest. |
+| `ErasureData(target_ids, retained_ids, heldout_ids, manifest)` | Token ids ready for `rspd.erase`, plus the data manifest. |
 | `build_erasure_data(tokenizer, spec, *, cache_dir=None, log=print) -> ErasureData` | Build `X`, `Y` and the readouts (downloads and caches corpora). |
 | `spec_path(name) -> str` | Path of a shipped dataset-builder config (`data/specs/<name>.yaml`). |
 | `SPECS_DIR` | Directory of the shipped configs. |
 
-`srspd_experiments.methods`:
+`rspd.experiments.methods`:
 
 | symbol | semantics |
 | --- | --- |
 | `METHODS` | `{recipe method name: runner module path}` (`srspd`, `rmu`, `kuda`, `simnpo`, the three authors'-code runners). |
-| `get(method)` | Import a runner module; each has `run(config, ...) -> dict` writing under the data root. `methods.srspd.run(config, *, model=None, tokenizer=None, out_root=None, log_root=None, progress=None)` does one `srspd.erase` for every dose and rule and exports each. |
+| `get(method)` | Import a runner module; each has `run(config, ...) -> dict` writing under the data root. `methods.srspd.run(config, *, model=None, tokenizer=None, out_root=None, log_root=None, progress=None)` does one `rspd.erase` for every dose and rule and exports each. |
 
-`srspd_experiments.models`:
+`rspd.experiments.models`:
 
 | symbol | semantics |
 | --- | --- |
@@ -215,11 +215,11 @@ within tolerance and every row's `tp` equals the recipe's `tensor_parallel_size`
 | `DEFAULT_BLOCK_PARAM_NAMES` | `("mlp.down_proj.weight",)`. |
 | `save_model(model, tokenizer, out_dir, *, processor=None, source=None) -> str` | `save_pretrained` model + tokenizer (+ processor). |
 | `save_processor(model, tokenizer, out_dir, *, processor=None, source=None) -> bool` | Save a multimodal processor beside a checkpoint. |
-| `export_checkpoint(model, tokenizer, out_dir, *, source=None, processor=None, save_source_processor="auto", token=None) -> dict` | `srspd.models.export.export_checkpoint` plus a multimodal model's processor. |
+| `export_checkpoint(model, tokenizer, out_dir, *, source=None, processor=None, save_source_processor="auto", token=None) -> dict` | `rspd.models.export.export_checkpoint` plus a multimodal model's processor. |
 | `is_multimodal(model) -> bool` | Whether the config carries a non-text tower. |
 | `write_metrics(out_dir, metrics) -> str` | Write `metrics.json`. |
 
-`srspd_experiments.paths` (data root: argument, else `$SRSPD_DATA_DIR`, else `~/.cache/srspd`):
+`rspd.experiments.paths` (data root: argument, else `$RSPD_DATA_DIR`, else `~/.cache/rspd`):
 
 | symbol | semantics |
 | --- | --- |
@@ -232,8 +232,8 @@ within tolerance and every row's `tp` equals the recipe's `tensor_parallel_size`
 | `resolve_model_path(model_path, root=None) -> str` | A `models/...` checkpoint reference to an absolute path. |
 | `hf_token()` | `HF_TOKEN` / `HUGGING_FACE_HUB_TOKEN` when set. |
 
-`srspd_experiments.recipes` (re-exported from `.catalog` and `.legacy`) and
-`srspd_experiments.recipes.compare`:
+`rspd.experiments.recipes` (re-exported from `.catalog` and `.legacy`) and
+`rspd.experiments.recipes.compare`:
 
 | symbol | semantics |
 | --- | --- |
@@ -248,7 +248,7 @@ within tolerance and every row's `tp` equals the recipe's `tensor_parallel_size`
 | `format_report(rep) -> str` | The comparison as text. |
 | `mu_per_token_from_legacy(mu_raw, n_x, n_y) -> float` | The one translation of a legacy dose: `mu_raw · n_x / n_y`. Recipes only; never an entry-point dose. |
 
-`srspd_experiments.results` (schema `srspd-experiments/results/v1`):
+`rspd.experiments.results` (schema `rspd[experiments]/results/v1`):
 
 | symbol | semantics |
 | --- | --- |
@@ -257,7 +257,7 @@ within tolerance and every row's `tp` equals the recipe's `tensor_parallel_size`
 | `read_results(path) -> list` | Read one (schema checked). |
 | `index(rows) -> dict` | `{(task, metric): row}`; duplicates raise. |
 
-Evaluators (`srspd_experiments.eval.*`) each expose `resolve_config(cfg)` and `run(cfg, ...)`
+Evaluators (`rspd.experiments.eval.*`) each expose `resolve_config(cfg)` and `run(cfg, ...)`
 writing `results.json`: `lm_eval.run(cfg, *, out_dir=None, root=None, tasks_override=None,
 runner=None)` (`lm_eval.tensor_parallel_size(cfg)` is the TP a config runs at),
 `muse.run(cfg, ...)`, `recovery.run(cfg, ...)`; `krd.krd_from_results(...)` and

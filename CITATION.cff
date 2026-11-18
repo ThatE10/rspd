@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it and the works it builds on."
-title: "srspd"
+title: "rspd"
 type: software
 references:
   - type: article

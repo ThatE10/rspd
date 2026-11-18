@@ -7,7 +7,7 @@ leaks, switch the dose, restore the model and export the edit.
 ## The check
 
 1. Start an agent with an empty context, the repository checkout and an environment that
-   has `torch` and `transformers` but not necessarily an installed `srspd`. Give it
+   has `torch` and `transformers` but not necessarily an installed `rspd`. Give it
    `AGENTS.md` and this task, and forbid reading anything under `packages/` or `docs/`:
 
    > Using a tiny random-weight GPT-2, write and run a script that inspects the model,
@@ -20,7 +20,7 @@ leaks, switch the dose, restore the model and export the edit.
    * the printed leaks are `L_X_rel` and `L_Y_rel` for **every** edited matrix;
    * the second dose is applied with `report.apply_dose` (no second `erase`), and a larger
      `mu_per_token` gives a smaller `L_X_rel`;
-   * after `srspd.restore`, every parameter equals its pristine value (`torch.equal`);
+   * after `rspd.restore`, every parameter equals its pristine value (`torch.equal`);
    * the exported checkpoint reloads with `transformers` and equals the edited weights;
    * the agent never passes `mu` or `mu_raw` as a dose and never writes anything but
      `W − M` into the model.
@@ -37,14 +37,14 @@ The same steps work with a real model name in place of the tiny GPT-2 (`AGENTS.m
 alone (the author had read the source, so this is a weaker test than a truly fresh agent;
 repeat it with one).
 
-* First run: `ModuleNotFoundError: No module named 'srspd'`. `AGENTS.md` said nothing about
+* First run: `ModuleNotFoundError: No module named 'rspd'`. `AGENTS.md` said nothing about
   installation or running from a checkout. Fixed: a **Setup** section (git install, or
-  `PYTHONPATH` from a checkout, and `python -m srspd.cli` when the console script is not
+  `PYTHONPATH` from a checkout, and `python -m rspd.cli` when the console script is not
   installed).
 * Second run: passed. Inspect (12 matrices, preset `gpt2`), erase at `mu_per_token` 0.5
   with a grid `[0.5, 2.0]`, leaks printed for all 12 matrices, `apply_dose(2.0)` lowered the
   median `c_fc` `L_X_rel` from 0.615 to 0.324, `restore` was bit for bit, the export reloaded
-  equal to the edited weights, `close()` left the model pristine, and `srspd report` read
+  equal to the edited weights, `close()` left the model pristine, and `rspd report` read
   the saved JSON.
 * Also added after the run: how to load a model by name and pass text with a tokenizer
   (the task statement in the tracking issue starts from a model name).

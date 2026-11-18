@@ -1,0 +1,40 @@
+# The trilingual GPT-2 pretraining corpus: fit the BPE, write the tokenized shards
+# (rspd.experiments.data.gpt2_corpus.prepare). Balanced 1/3 per language BY TOKEN
+# COUNT. The published build streamed `revision: main` (as below), so a rebuild
+# today may read different documents than the published shards hold.
+name: gpt2_corpus
+corpus:
+  tokens_per_language: 833333334
+  # The recovery monitors score a prefix of val; 1M per language is headroom.
+  val_tokens: 1000000
+  recovery_tokens: 900000000
+  # Only Dutch is fine-tuned on in the Dutch-only recovery protocol.
+  recovery_languages: [nld]
+  # Documents per encode() call (the batch path releases the GIL).
+  encode_batch: 2000
+  buckets:
+  - lang: eng
+    dataset: HuggingFaceFW/fineweb
+    config: sample-10BT
+    split: train
+    revision: main
+    text_field: text
+    min_chars: 200
+  - lang: deu
+    dataset: HuggingFaceFW/fineweb-2
+    config: deu_Latn
+    split: train
+    revision: main
+    text_field: text
+    min_chars: 200
+  - lang: nld
+    dataset: HuggingFaceFW/fineweb-2
+    config: nld_Latn
+    split: train
+    revision: main
+    text_field: text
+    min_chars: 200
+tokenizer:
+  bytes_per_language: 100000000
+  vocab_size: 50257
+  fertility_chars: 2000000

@@ -1,4 +1,4 @@
-# srspd
+# rspd
 
 Closed-form selective erasure of behaviour from a model's linear layers, by subtraction.
 
@@ -16,8 +16,8 @@ This repository holds two distributions:
 
 | distribution | path | what it is |
 | --- | --- | --- |
-| `srspd` | `packages/srspd` | the slim core: solve, COALA truncation, edit, leaks, Gram streaming, HF model capture |
-| `srspd-experiments` | `packages/srspd-experiments` | data builders, evaluation, baseline methods, reproduction recipes |
+| `rspd` | `packages/rspd` | the slim core: solve, COALA truncation, edit, leaks, Gram streaming, HF model capture |
+| `rspd[experiments]` | `packages/rspd[experiments]` | data builders, evaluation, baseline methods, reproduction recipes |
 
 Status: private, pre-release; there is no public release (`docs/releasing.md`). Work is
 tracked in this repository's issues.
@@ -27,7 +27,7 @@ tracked in this repository's issues.
 | file | for |
 | --- | --- |
 | `AGENTS.md` | agents (and anyone new): the five convention rules, the dose, the standard workflow, the report, failure modes |
-| `packages/srspd/README.md`, `packages/srspd-experiments/README.md` | install, extras, minimal examples, supported models, credits |
+| `docs/usage.md`, `docs/experiments.md` | install, extras, minimal examples, supported models, credits |
 | `docs/math.md` | the method: objective, closed forms, leaks, specificity, the dose derivation, COALA truncation |
 | `docs/api.md` | every public symbol and CLI option of both packages |
 | `docs/releasing.md` | wheels, tags, pinning from another repository |
@@ -35,7 +35,7 @@ tracked in this repository's issues.
 
 Tests (both packages, including the documentation tests), from the repository root:
 
-    PYTHONPATH=packages/srspd/src:packages/srspd-experiments/src python -m pytest -q
+    PYTHONPATH=src:packages/rspd[experiments]/src python -m pytest -q
 
 ## Credits
 

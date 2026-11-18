@@ -1,6 +1,6 @@
 # The method
 
-This page states what `srspd` computes and why. Notation is fixed throughout the package
+This page states what `rspd` computes and why. Notation is fixed throughout the package
 and never swapped.
 
 | symbol | meaning |
@@ -43,7 +43,7 @@ least-squares readout of the target that is blind to the retained set, and
 
 One `S` serves every matrix that reads the same input (q/k/v share one, gate/up share
 one). This form also exposes the target response `M Xᵀ`, which rank truncation needs.
-Functions: `srspd.readout_gram`, `srspd.erased_component_gram`, `srspd.erased_component`.
+Functions: `rspd.readout_gram`, `rspd.erased_component_gram`, `rspd.erased_component`.
 
 ### Two-Gram form (`solver="grams"`)
 
@@ -54,8 +54,8 @@ same pass that forms `G_Y`, and
 
 It is the same `M` (equal to float64 round-off for the same inputs and ridge). `M` is
 returned dense (`A = M`, `B = I`) and cannot be rank-truncated, because `M Xᵀ` is never
-formed. Functions: `srspd.factor_grams`, `srspd.erased_component_grams`,
-`srspd.leaks_grams`.
+formed. Functions: `rspd.factor_grams`, `rspd.erased_component_grams`,
+`rspd.leaks_grams`.
 
 ## The kept map and the core table
 
@@ -71,8 +71,8 @@ batch the two possible edits agree; off it they do not:
 the batch does not span. Neither set spans the input space, so this term is not zero.
 Writing the kept map into a model throws it away, and under rank truncation the kept map
 also loses retained behaviour inside the span. That is why the only edit the package
-writes is `W − M` (`srspd.apply_erasure`), and why `apply_erasure` refuses a `KeptMap`.
-The table is available at run time as `srspd.CORE_TABLE`.
+writes is `W − M` (`rspd.apply_erasure`), and why `apply_erasure` refuses a `KeptMap`.
+The table is available at run time as `rspd.CORE_TABLE`.
 
 ## Leaks
 
@@ -85,8 +85,8 @@ Both are zero only when span(X) and span(Y) are disentangled and `M` is untrunca
 squares are reported as `target_surviving_rel = L_X_rel²` (fraction of target energy left)
 and `retained_disturbed_rel = L_Y_rel²`; `erased_rel` / `retained_rel` are deprecated
 aliases of the same two values (read `erased_rel` as "fraction of target energy left"). From the Grams:
-`‖M Yᵀ‖² = tr(M G_Y Mᵀ)`, so `L_Y` never needs `Y` itself (`srspd.leaks_gram`,
-`srspd.leaks_grams`).
+`‖M Yᵀ‖² = tr(M G_Y Mᵀ)`, so `L_Y` never needs `Y` itself (`rspd.leaks_gram`,
+`rspd.leaks_grams`).
 
 ## The specificity spectrum
 
@@ -98,10 +98,10 @@ generalised eigenvalues `γ`,
 say how much more target than retained each input direction carries, per token. A
 direction with `γ = 100` is a hundred times more target than retained; one with `γ ≪ 1`
 is mostly retained. At most `min(n_x, d_in)` values are nonzero (the target spans at most
-`n_x` directions); the rest are exactly 0 and not reported. `srspd.specificity` computes
+`n_x` directions); the rest are exactly 0 and not reported. `rspd.specificity` computes
 them as the squared singular values of `X L_y⁻ᵀ / √n_x` with `L_y = chol(C_Y)` (one
 triangular solve), falling back to an `eigh` pseudo-inverse square root when `C_Y` is not
-positive definite. `srspd.erase` reports the top values, the median and the counts above
+positive definite. `rspd.erase` reports the top values, the median and the counts above
 1, 10 and 100 per input key (`report.specificity[key]["specificity"]`), and the whole
 spectrum with `spectrum="full"`.
 
@@ -120,7 +120,7 @@ other two parametrisations are derived and only reported:
     μ      = n_x / (m n_y)          (the solve's weight on the retained term)
     mu_raw = 1/μ = m n_y / n_x      (the weight on the target term at unit retained weight)
 
-Larger `m` erases more. `srspd.dose_from_mu_per_token(m, n_x, n_y)` returns a `Dose`
+Larger `m` erases more. `rspd.dose_from_mu_per_token(m, n_x, n_y)` returns a `Dose`
 whose `.mu` is what the low-level solves take.
 
 ### What a dose erases
@@ -146,7 +146,7 @@ nonsingular). A ridge adds `δ‖M‖²`, which is isotropic in input space and 
 the `γ` basis; a rank truncation selects directions by the SVD of `M Xᵀ`, which is weighted
 by `W`. Both make the relation approximate.
 
-`srspd.suggest_mu_per_token(gamma, fractions, quantiles)` inverts it: for every quantile
+`rspd.suggest_mu_per_token(gamma, fractions, quantiles)` inverts it: for every quantile
 `q` of the `γ` spectrum and erased fraction `f` it returns `m = f / ((1 − f) γ_q)`
 (`inf` when `γ_q = 0`), plus the sorted distinct finite values as a ready dose grid.
 
@@ -164,7 +164,7 @@ on the response, `M_r Xᵀ = [M Xᵀ]_r`: the truncation keeps the best rank-`r`
 output, not zero. Since `range(M) = range(M Xᵀ)`, `M_r = M` at full rank. The edit is still
 `W_new = W − M_r`, and its leaks are measured like any other edit.
 
-Rank rules (`rank_rule=` in `srspd.erase`, `specs` in `srspd.truncate_component`):
+Rank rules (`rank_rule=` in `rspd.erase`, `specs` in `rspd.truncate_component`):
 
 | rule | kept rank |
 | --- | --- |
@@ -176,7 +176,7 @@ rules costs one SVD, not one per rule.
 
 ### Compression is a different operation
 
-`srspd.compress_weight` / `srspd.fit_coala` apply the same COALA projector to `W` itself
+`rspd.compress_weight` / `rspd.fit_coala` apply the same COALA projector to `W` itself
 (`W_r = U_r U_rᵀ W`, `U_r` from `W Xᵀ`) and the result **replaces** the weight. It is the
 only weight replacement in the package and it is never an erasure.
 

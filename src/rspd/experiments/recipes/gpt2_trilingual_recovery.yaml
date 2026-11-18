@@ -1,0 +1,1963 @@
+# Reproduction recipe: GPT-2 124M trilingual retrain-to-recover: SRSPD vs SimNPO, RMU, KUDA (sweep settings and equal-budget variants)
+# Generated from the published run configs and result tables; doses are
+# mu_per_token (legacy doses are converted at load, recipes.legacy).
+result: gpt2_trilingual_recovery
+title: 'GPT-2 124M trilingual retrain-to-recover: SRSPD vs SimNPO, RMU, KUDA (sweep settings and equal-budget
+  variants)'
+description: Each edited checkpoint is retrained on the pretraining mixture until its Dutch validation
+  CE is back at the unedited model's (tolerance 0 and 1%); the measured quantity is the token count M
+  (rspd.experiments.eval.recovery). Equal-budget runs see the target 200 times and every retained token
+  once.
+model: thate10/rspd-gpt2-124m-trilingual-base
+base_checkpoint: models/recipes/gpt2_trilingual_base
+tensor_parallel_size: 1
+hardware:
+  method: 1x 48 GB GPU (L40S)
+  eval: 1x 80 GB GPU (H100), retraining
+data_prep:
+- download:
+    repo: thate10/rspd-gpt2-124m-trilingual-base
+    local_dir: models/recipes/gpt2_trilingual_base
+  note: the trilingual base checkpoint (private repo; needs HF_TOKEN)
+- call: rspd.experiments.data.gpt2_corpus:prepare
+  spec: gpt2_trilingual_corpus
+  note: the pretraining corpus and BPE (the recovery stream and tokenizer)
+- call: rspd.experiments.data.gpt2_unlearning:prepare_unlearning_sets
+  spec: gpt2_unlearning_1m
+  note: the unlearning sets; time-dependent rebuild (live Wikipedia API) unless a published copy is passed
+    to gpt2_unlearning.ensure_unlearning_sets
+eval:
+  kind: recovery
+  config:
+    corpus_name: gpt2_corpus
+    recovery:
+      ce_nld_original: 3.5437
+      tolerance: 0.0
+      stream: train
+      stream_languages:
+      - eng
+      - deu
+      - nld
+      stream_seed: 2026
+      cap_tokens: 1000000000
+      eval_every_tokens: 25000000
+      eval_batches: 40
+      batch_tokens: 491520
+      micro_batch: 16
+      block_size: 1024
+      lr: 0.0001
+      min_lr_frac: 0.1
+      warmup_tokens: 5000000
+      weight_decay: 0.1
+      grad_clip: 1.0
+      seed: 1337
+      compile: true
+      dtype: bfloat16
+      monitors:
+        unlearning_sets: gpt2_unlearning_1m
+        train_sample_tokens: 200000
+      weight_delta:
+        erank: true
+baseline:
+  id: base
+  label: Unmodified
+  eval_overrides:
+    condition: base
+  published:
+  - task: recovery/base
+    metric: M_tokens_tol1pct
+    value: 0.0
+    rel_tol: 0.5
+    note: stochastic retraining at 25M-token evaluation granularity
+  - task: recovery/base
+    metric: M_tokens_tol0
+    value: 0.0
+    rel_tol: 0.5
+    note: stochastic retraining at 25M-token evaluation granularity
+runs:
+- id: simnpo_lr1e4_b01
+  method: simnpo
+  label: SimNPO, lr 1e-4, β 0.1
+  config:
+    name: gpt2_trilingual_simnpo_lr1e4_b01
+    model: models/recipes/gpt2_trilingual_base
+    dtype: float32
+    device_map: cuda
+    seed: 42
+    corpora:
+      target_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/target_nld.jsonl
+        text_field: text
+        topic: target
+      contrastive:
+        kind: local_jsonl
+        path:
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_eng.jsonl
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_deu.jsonl
+        text_field: text
+        topic: retain
+      heldout_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_nld.jsonl
+        text_field: text
+        topic: heldout
+      heldout_eng:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_eng.jsonl
+        text_field: text
+        topic: heldout
+      heldout_deu:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_deu.jsonl
+        text_field: text
+        topic: heldout
+    heldout:
+      rows: 32
+      max_length: 1024
+      tail:
+      - heldout_eng
+      - heldout_deu
+    simnpo:
+      beta: 0.1
+      gamma: 0.0
+      forget_weight: 1.0
+      retain_weight: 1.0
+      forget_corpora:
+      - target_nld
+      retain_corpus: contrastive
+      min_len: 0
+      forget_max_length: 1024
+      retain_max_length: 1024
+      max_rows: 4000
+    train:
+      optim: adamw_torch
+      lr: 0.0001
+      max_steps: 200
+      num_epochs: 1000
+      batch_size: 2
+      grad_accum: 2
+      weight_decay: 0.0
+      max_grad_norm: 1.0
+      warmup_steps: null
+      bf16: false
+      gradient_checkpointing: false
+      log_every: 10
+  exports:
+  - id: simnpo_lr1e4_b01
+    eval_overrides:
+      condition: simnpo_lr1e4_b01
+    weights:
+      repo: thate10/rspd-gpt2-124m-trilingual-unlearned
+      subfolder: simnpo_lr1e4_b01
+      private: true
+    published:
+    - task: recovery/simnpo_lr1e4_b01
+      metric: M_tokens_tol1pct
+      value: 25067520.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+    - task: recovery/simnpo_lr1e4_b01
+      metric: M_tokens_tol0
+      value: 225607680.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+- id: simnpo_lr3e4_b01
+  method: simnpo
+  label: SimNPO, lr 3e-4, β 0.1
+  config:
+    name: gpt2_trilingual_simnpo_lr3e4_b01
+    model: models/recipes/gpt2_trilingual_base
+    dtype: float32
+    device_map: cuda
+    seed: 42
+    corpora:
+      target_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/target_nld.jsonl
+        text_field: text
+        topic: target
+      contrastive:
+        kind: local_jsonl
+        path:
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_eng.jsonl
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_deu.jsonl
+        text_field: text
+        topic: retain
+      heldout_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_nld.jsonl
+        text_field: text
+        topic: heldout
+      heldout_eng:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_eng.jsonl
+        text_field: text
+        topic: heldout
+      heldout_deu:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_deu.jsonl
+        text_field: text
+        topic: heldout
+    heldout:
+      rows: 32
+      max_length: 1024
+      tail:
+      - heldout_eng
+      - heldout_deu
+    simnpo:
+      beta: 0.1
+      gamma: 0.0
+      forget_weight: 1.0
+      retain_weight: 1.0
+      forget_corpora:
+      - target_nld
+      retain_corpus: contrastive
+      min_len: 0
+      forget_max_length: 1024
+      retain_max_length: 1024
+      max_rows: 4000
+    train:
+      optim: adamw_torch
+      lr: 0.0003
+      max_steps: 200
+      num_epochs: 1000
+      batch_size: 2
+      grad_accum: 2
+      weight_decay: 0.0
+      max_grad_norm: 1.0
+      warmup_steps: null
+      bf16: false
+      gradient_checkpointing: false
+      log_every: 10
+  exports:
+  - id: simnpo_lr3e4_b01
+    eval_overrides:
+      condition: simnpo_lr3e4_b01
+    weights:
+      repo: thate10/rspd-gpt2-124m-trilingual-unlearned
+      subfolder: simnpo_lr3e4_b01
+      private: true
+    published:
+    - task: recovery/simnpo_lr3e4_b01
+      metric: M_tokens_tol1pct
+      value: 75202560.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+    - task: recovery/simnpo_lr3e4_b01
+      metric: M_tokens_tol0
+      value: 275742720.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+- id: simnpo_lr3e5_b01
+  method: simnpo
+  label: SimNPO, lr 3e-5, β 0.1
+  config:
+    name: gpt2_trilingual_simnpo_lr3e5_b01
+    model: models/recipes/gpt2_trilingual_base
+    dtype: float32
+    device_map: cuda
+    seed: 42
+    corpora:
+      target_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/target_nld.jsonl
+        text_field: text
+        topic: target
+      contrastive:
+        kind: local_jsonl
+        path:
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_eng.jsonl
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_deu.jsonl
+        text_field: text
+        topic: retain
+      heldout_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_nld.jsonl
+        text_field: text
+        topic: heldout
+      heldout_eng:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_eng.jsonl
+        text_field: text
+        topic: heldout
+      heldout_deu:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_deu.jsonl
+        text_field: text
+        topic: heldout
+    heldout:
+      rows: 32
+      max_length: 1024
+      tail:
+      - heldout_eng
+      - heldout_deu
+    simnpo:
+      beta: 0.1
+      gamma: 0.0
+      forget_weight: 1.0
+      retain_weight: 1.0
+      forget_corpora:
+      - target_nld
+      retain_corpus: contrastive
+      min_len: 0
+      forget_max_length: 1024
+      retain_max_length: 1024
+      max_rows: 4000
+    train:
+      optim: adamw_torch
+      lr: 3.0e-05
+      max_steps: 200
+      num_epochs: 1000
+      batch_size: 2
+      grad_accum: 2
+      weight_decay: 0.0
+      max_grad_norm: 1.0
+      warmup_steps: null
+      bf16: false
+      gradient_checkpointing: false
+      log_every: 10
+  exports:
+  - id: simnpo_lr3e5_b01
+    eval_overrides:
+      condition: simnpo_lr3e5_b01
+    weights:
+      repo: thate10/rspd-gpt2-124m-trilingual-unlearned
+      subfolder: simnpo_lr3e5_b01
+      private: true
+    published:
+    - task: recovery/simnpo_lr3e5_b01
+      metric: M_tokens_tol1pct
+      value: 25067520.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+    - task: recovery/simnpo_lr3e5_b01
+      metric: M_tokens_tol0
+      value: 175472640.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+- id: rmu_s100_a100_lr5e4
+  method: rmu
+  label: RMU, s 100, α 100, lr 5e-4
+  config:
+    name: gpt2_trilingual_rmu_s100_a100_lr5e4
+    model: models/recipes/gpt2_trilingual_base
+    dtype: float32
+    device_map: cuda
+    seed: 42
+    corpora:
+      target_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/target_nld.jsonl
+        text_field: text
+        topic: target
+      contrastive:
+        kind: local_jsonl
+        path:
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_eng.jsonl
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_deu.jsonl
+        text_field: text
+        topic: retain
+      heldout_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_nld.jsonl
+        text_field: text
+        topic: heldout
+      heldout_eng:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_eng.jsonl
+        text_field: text
+        topic: heldout
+      heldout_deu:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_deu.jsonl
+        text_field: text
+        topic: heldout
+    heldout:
+      rows: 32
+      max_length: 1024
+      tail:
+      - heldout_eng
+      - heldout_deu
+    rmu:
+      forget_corpora:
+      - target_nld
+      retain_corpora:
+      - contrastive
+      param_names:
+      - mlp.c_proj.weight
+      steering_coeffs:
+      - 100.0
+      alpha:
+      - 100.0
+      lr: 0.0005
+      max_num_batches: 150
+      batch_size: 4
+      epochs: 150
+      layer_id: 5
+      layer_ids:
+      - 3
+      - 4
+      - 5
+      position_ids_from_mask: true
+      min_len: 0
+      seed: 42
+      verbose: true
+  exports:
+  - id: rmu_s100_a100_lr5e4
+    eval_overrides:
+      condition: rmu_s100_a100_lr5e4
+    weights:
+      repo: thate10/rspd-gpt2-124m-trilingual-unlearned
+      subfolder: rmu_s100_a100_lr5e4
+      private: true
+    published:
+    - task: recovery/rmu_s100_a100_lr5e4
+      metric: M_tokens_tol1pct
+      value: 25067520.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+    - task: recovery/rmu_s100_a100_lr5e4
+      metric: M_tokens_tol0
+      value: 200540160.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+- id: rmu_s100_a100_lr1e4
+  method: rmu
+  label: RMU, s 100, α 100, lr 1e-4
+  config:
+    name: gpt2_trilingual_rmu_s100_a100_lr1e4
+    model: models/recipes/gpt2_trilingual_base
+    dtype: float32
+    device_map: cuda
+    seed: 42
+    corpora:
+      target_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/target_nld.jsonl
+        text_field: text
+        topic: target
+      contrastive:
+        kind: local_jsonl
+        path:
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_eng.jsonl
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_deu.jsonl
+        text_field: text
+        topic: retain
+      heldout_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_nld.jsonl
+        text_field: text
+        topic: heldout
+      heldout_eng:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_eng.jsonl
+        text_field: text
+        topic: heldout
+      heldout_deu:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_deu.jsonl
+        text_field: text
+        topic: heldout
+    heldout:
+      rows: 32
+      max_length: 1024
+      tail:
+      - heldout_eng
+      - heldout_deu
+    rmu:
+      forget_corpora:
+      - target_nld
+      retain_corpora:
+      - contrastive
+      param_names:
+      - mlp.c_proj.weight
+      steering_coeffs:
+      - 100.0
+      alpha:
+      - 100.0
+      lr: 0.0001
+      max_num_batches: 150
+      batch_size: 4
+      epochs: 150
+      layer_id: 5
+      layer_ids:
+      - 3
+      - 4
+      - 5
+      position_ids_from_mask: true
+      min_len: 0
+      seed: 42
+      verbose: true
+  exports:
+  - id: rmu_s100_a100_lr1e4
+    eval_overrides:
+      condition: rmu_s100_a100_lr1e4
+    weights:
+      repo: thate10/rspd-gpt2-124m-trilingual-unlearned
+      subfolder: rmu_s100_a100_lr1e4
+      private: true
+    published:
+    - task: recovery/rmu_s100_a100_lr1e4
+      metric: M_tokens_tol1pct
+      value: 25067520.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+    - task: recovery/rmu_s100_a100_lr1e4
+      metric: M_tokens_tol0
+      value: 175472640.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+- id: rmu_s100_a10_lr1e4
+  method: rmu
+  label: RMU, s 100, α 10, lr 1e-4
+  config:
+    name: gpt2_trilingual_rmu_s100_a10_lr1e4
+    model: models/recipes/gpt2_trilingual_base
+    dtype: float32
+    device_map: cuda
+    seed: 42
+    corpora:
+      target_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/target_nld.jsonl
+        text_field: text
+        topic: target
+      contrastive:
+        kind: local_jsonl
+        path:
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_eng.jsonl
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_deu.jsonl
+        text_field: text
+        topic: retain
+      heldout_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_nld.jsonl
+        text_field: text
+        topic: heldout
+      heldout_eng:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_eng.jsonl
+        text_field: text
+        topic: heldout
+      heldout_deu:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_deu.jsonl
+        text_field: text
+        topic: heldout
+    heldout:
+      rows: 32
+      max_length: 1024
+      tail:
+      - heldout_eng
+      - heldout_deu
+    rmu:
+      forget_corpora:
+      - target_nld
+      retain_corpora:
+      - contrastive
+      param_names:
+      - mlp.c_proj.weight
+      steering_coeffs:
+      - 100.0
+      alpha:
+      - 10.0
+      lr: 0.0001
+      max_num_batches: 150
+      batch_size: 4
+      epochs: 150
+      layer_id: 5
+      layer_ids:
+      - 3
+      - 4
+      - 5
+      position_ids_from_mask: true
+      min_len: 0
+      seed: 42
+      verbose: true
+  exports:
+  - id: rmu_s100_a10_lr1e4
+    eval_overrides:
+      condition: rmu_s100_a10_lr1e4
+    weights:
+      repo: thate10/rspd-gpt2-124m-trilingual-unlearned
+      subfolder: rmu_s100_a10_lr1e4
+      private: true
+    published:
+    - task: recovery/rmu_s100_a10_lr1e4
+      metric: M_tokens_tol1pct
+      value: 25067520.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+    - task: recovery/rmu_s100_a10_lr1e4
+      metric: M_tokens_tol0
+      value: 175472640.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+- id: kuda_tau1e2_lr3e4
+  method: kuda
+  label: KUDA, τ 1e-2, lr 3e-4
+  config:
+    name: gpt2_trilingual_kuda_tau1e2_lr3e4
+    model: models/recipes/gpt2_trilingual_base
+    dtype: float32
+    device_map: cuda
+    seed: 42
+    corpora:
+      target_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/target_nld.jsonl
+        text_field: text
+        topic: target
+      contrastive:
+        kind: local_jsonl
+        path:
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_eng.jsonl
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_deu.jsonl
+        text_field: text
+        topic: retain
+      heldout_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_nld.jsonl
+        text_field: text
+        topic: heldout
+      heldout_eng:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_eng.jsonl
+        text_field: text
+        topic: heldout
+      heldout_deu:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_deu.jsonl
+        text_field: text
+        topic: heldout
+    heldout:
+      rows: 32
+      max_length: 1024
+      tail:
+      - heldout_eng
+      - heldout_deu
+    kuda:
+      beta: 2.0
+      tau: 0.01
+      alpha:
+      - 1.0
+      lr: 0.0003
+      batch_size: 1
+      max_num_batches: 8
+      epoch: 200
+      init_jitter: 0.0
+      layer_id: 6
+      layer_ids:
+      - 3
+      - 4
+      - 5
+      - 6
+      module_name: mlp.c_proj
+      position_ids_from_mask: true
+      forget_corpora:
+      - target_nld
+      retain_corpora:
+      - contrastive
+      min_len: 0
+      retain_max_length: 1024
+      nullspace:
+        sample_p: 100
+        max_cov_texts: null
+        max_length: 1024
+        batch_size: 8
+        svd_device: auto
+        cov_device: auto
+        cov_dtype: float32
+        use_cache: true
+  exports:
+  - id: kuda_tau1e2_lr3e4
+    eval_overrides:
+      condition: kuda_tau1e2_lr3e4
+    weights:
+      repo: thate10/rspd-gpt2-124m-trilingual-unlearned
+      subfolder: kuda_tau1e2_lr3e4
+      private: true
+    published:
+    - task: recovery/kuda_tau1e2_lr3e4
+      metric: M_tokens_tol1pct
+      value: 25067520.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+    - task: recovery/kuda_tau1e2_lr3e4
+      metric: M_tokens_tol0
+      value: 275742720.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+- id: kuda_tau1e2_lr1e3
+  method: kuda
+  label: KUDA, τ 1e-2, lr 1e-3
+  config:
+    name: gpt2_trilingual_kuda_tau1e2_lr1e3
+    model: models/recipes/gpt2_trilingual_base
+    dtype: float32
+    device_map: cuda
+    seed: 42
+    corpora:
+      target_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/target_nld.jsonl
+        text_field: text
+        topic: target
+      contrastive:
+        kind: local_jsonl
+        path:
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_eng.jsonl
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_deu.jsonl
+        text_field: text
+        topic: retain
+      heldout_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_nld.jsonl
+        text_field: text
+        topic: heldout
+      heldout_eng:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_eng.jsonl
+        text_field: text
+        topic: heldout
+      heldout_deu:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_deu.jsonl
+        text_field: text
+        topic: heldout
+    heldout:
+      rows: 32
+      max_length: 1024
+      tail:
+      - heldout_eng
+      - heldout_deu
+    kuda:
+      beta: 2.0
+      tau: 0.01
+      alpha:
+      - 1.0
+      lr: 0.001
+      batch_size: 1
+      max_num_batches: 8
+      epoch: 200
+      init_jitter: 0.0
+      layer_id: 6
+      layer_ids:
+      - 3
+      - 4
+      - 5
+      - 6
+      module_name: mlp.c_proj
+      position_ids_from_mask: true
+      forget_corpora:
+      - target_nld
+      retain_corpora:
+      - contrastive
+      min_len: 0
+      retain_max_length: 1024
+      nullspace:
+        sample_p: 100
+        max_cov_texts: null
+        max_length: 1024
+        batch_size: 8
+        svd_device: auto
+        cov_device: auto
+        cov_dtype: float32
+        use_cache: true
+  exports:
+  - id: kuda_tau1e2_lr1e3
+    eval_overrides:
+      condition: kuda_tau1e2_lr1e3
+    weights:
+      repo: thate10/rspd-gpt2-124m-trilingual-unlearned
+      subfolder: kuda_tau1e2_lr1e3
+      private: true
+    published:
+    - task: recovery/kuda_tau1e2_lr1e3
+      metric: M_tokens_tol1pct
+      value: 75202560.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+    - task: recovery/kuda_tau1e2_lr1e3
+      metric: M_tokens_tol0
+      value: 426147840.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+- id: kuda_tau1e1_lr1e3
+  method: kuda
+  label: KUDA, τ 1e-1, lr 1e-3
+  config:
+    name: gpt2_trilingual_kuda_tau1e1_lr1e3
+    model: models/recipes/gpt2_trilingual_base
+    dtype: float32
+    device_map: cuda
+    seed: 42
+    corpora:
+      target_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/target_nld.jsonl
+        text_field: text
+        topic: target
+      contrastive:
+        kind: local_jsonl
+        path:
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_eng.jsonl
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_deu.jsonl
+        text_field: text
+        topic: retain
+      heldout_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_nld.jsonl
+        text_field: text
+        topic: heldout
+      heldout_eng:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_eng.jsonl
+        text_field: text
+        topic: heldout
+      heldout_deu:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_deu.jsonl
+        text_field: text
+        topic: heldout
+    heldout:
+      rows: 32
+      max_length: 1024
+      tail:
+      - heldout_eng
+      - heldout_deu
+    kuda:
+      beta: 2.0
+      tau: 0.1
+      alpha:
+      - 1.0
+      lr: 0.001
+      batch_size: 1
+      max_num_batches: 8
+      epoch: 200
+      init_jitter: 0.0
+      layer_id: 6
+      layer_ids:
+      - 3
+      - 4
+      - 5
+      - 6
+      module_name: mlp.c_proj
+      position_ids_from_mask: true
+      forget_corpora:
+      - target_nld
+      retain_corpora:
+      - contrastive
+      min_len: 0
+      retain_max_length: 1024
+      nullspace:
+        sample_p: 100
+        max_cov_texts: null
+        max_length: 1024
+        batch_size: 8
+        svd_device: auto
+        cov_device: auto
+        cov_dtype: float32
+        use_cache: true
+  exports:
+  - id: kuda_tau1e1_lr1e3
+    eval_overrides:
+      condition: kuda_tau1e1_lr1e3
+    weights:
+      repo: thate10/rspd-gpt2-124m-trilingual-unlearned
+      subfolder: kuda_tau1e1_lr1e3
+      private: true
+    published:
+    - task: recovery/kuda_tau1e1_lr1e3
+      metric: M_tokens_tol1pct
+      value: 75202560.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+    - task: recovery/kuda_tau1e1_lr1e3
+      metric: M_tokens_tol0
+      value: 401080320.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+- id: equalbudget_simnpo_lr1e4_b01
+  method: simnpo
+  label: SimNPO, lr 1e-4, β 0.1 (equal budget)
+  config:
+    name: gpt2_trilingual_equalbudget_simnpo_lr1e4_b01
+    model: models/recipes/gpt2_trilingual_base
+    dtype: float32
+    device_map: cuda
+    seed: 42
+    corpora:
+      target_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/target_nld.jsonl
+        text_field: text
+        topic: target
+      contrastive:
+        kind: local_jsonl
+        path:
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_eng.jsonl
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_deu.jsonl
+        text_field: text
+        topic: retain
+      heldout_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_nld.jsonl
+        text_field: text
+        topic: heldout
+      heldout_eng:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_eng.jsonl
+        text_field: text
+        topic: heldout
+      heldout_deu:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_deu.jsonl
+        text_field: text
+        topic: heldout
+    heldout:
+      rows: 32
+      max_length: 1024
+      tail:
+      - heldout_eng
+      - heldout_deu
+    budget:
+      target_passes: 200
+      retain_exposure_tokens: 1000000
+      steps: 200
+      forget_max_length: 1024
+      retain_block: 1024
+    simnpo:
+      beta: 0.1
+      gamma: 0.0
+      forget_weight: 1.0
+      retain_weight: 1.0
+      forget_corpora:
+      - target_nld
+      retain_corpus: contrastive
+      min_len: 0
+      forget_max_length: 1024
+      retain_max_length: 1024
+      max_rows: 4000
+    train:
+      optim: adamw_torch
+      lr: 0.0001
+      max_steps: 200
+      num_epochs: 1000
+      batch_size: 1
+      grad_accum: 1
+      weight_decay: 0.0
+      max_grad_norm: 1.0
+      warmup_steps: null
+      bf16: false
+      gradient_checkpointing: false
+      log_every: 10
+  exports:
+  - id: equalbudget_simnpo_lr1e4_b01
+    eval_overrides:
+      condition: equalbudget_simnpo_lr1e4_b01
+    weights:
+      repo: thate10/rspd-gpt2-124m-trilingual-unlearned
+      subfolder: equalbudget_simnpo_lr1e4_b01
+      private: true
+    published:
+    - task: recovery/equalbudget_simnpo_lr1e4_b01
+      metric: M_tokens_tol1pct
+      value: 25067520.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+    - task: recovery/equalbudget_simnpo_lr1e4_b01
+      metric: M_tokens_tol0
+      value: 200540160.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+- id: equalbudget_simnpo_lr3e4_b01
+  method: simnpo
+  label: SimNPO, lr 3e-4, β 0.1 (equal budget)
+  config:
+    name: gpt2_trilingual_equalbudget_simnpo_lr3e4_b01
+    model: models/recipes/gpt2_trilingual_base
+    dtype: float32
+    device_map: cuda
+    seed: 42
+    corpora:
+      target_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/target_nld.jsonl
+        text_field: text
+        topic: target
+      contrastive:
+        kind: local_jsonl
+        path:
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_eng.jsonl
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_deu.jsonl
+        text_field: text
+        topic: retain
+      heldout_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_nld.jsonl
+        text_field: text
+        topic: heldout
+      heldout_eng:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_eng.jsonl
+        text_field: text
+        topic: heldout
+      heldout_deu:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_deu.jsonl
+        text_field: text
+        topic: heldout
+    heldout:
+      rows: 32
+      max_length: 1024
+      tail:
+      - heldout_eng
+      - heldout_deu
+    budget:
+      target_passes: 200
+      retain_exposure_tokens: 1000000
+      steps: 200
+      forget_max_length: 1024
+      retain_block: 1024
+    simnpo:
+      beta: 0.1
+      gamma: 0.0
+      forget_weight: 1.0
+      retain_weight: 1.0
+      forget_corpora:
+      - target_nld
+      retain_corpus: contrastive
+      min_len: 0
+      forget_max_length: 1024
+      retain_max_length: 1024
+      max_rows: 4000
+    train:
+      optim: adamw_torch
+      lr: 0.0003
+      max_steps: 200
+      num_epochs: 1000
+      batch_size: 1
+      grad_accum: 1
+      weight_decay: 0.0
+      max_grad_norm: 1.0
+      warmup_steps: null
+      bf16: false
+      gradient_checkpointing: false
+      log_every: 10
+  exports:
+  - id: equalbudget_simnpo_lr3e4_b01
+    eval_overrides:
+      condition: equalbudget_simnpo_lr3e4_b01
+    weights:
+      repo: thate10/rspd-gpt2-124m-trilingual-unlearned
+      subfolder: equalbudget_simnpo_lr3e4_b01
+      private: true
+    published:
+    - task: recovery/equalbudget_simnpo_lr3e4_b01
+      metric: M_tokens_tol1pct
+      value: 75202560.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+    - task: recovery/equalbudget_simnpo_lr3e4_b01
+      metric: M_tokens_tol0
+      value: 325877760.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+- id: equalbudget_simnpo_lr3e5_b01
+  method: simnpo
+  label: SimNPO, lr 3e-5, β 0.1 (equal budget)
+  config:
+    name: gpt2_trilingual_equalbudget_simnpo_lr3e5_b01
+    model: models/recipes/gpt2_trilingual_base
+    dtype: float32
+    device_map: cuda
+    seed: 42
+    corpora:
+      target_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/target_nld.jsonl
+        text_field: text
+        topic: target
+      contrastive:
+        kind: local_jsonl
+        path:
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_eng.jsonl
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_deu.jsonl
+        text_field: text
+        topic: retain
+      heldout_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_nld.jsonl
+        text_field: text
+        topic: heldout
+      heldout_eng:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_eng.jsonl
+        text_field: text
+        topic: heldout
+      heldout_deu:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_deu.jsonl
+        text_field: text
+        topic: heldout
+    heldout:
+      rows: 32
+      max_length: 1024
+      tail:
+      - heldout_eng
+      - heldout_deu
+    budget:
+      target_passes: 200
+      retain_exposure_tokens: 1000000
+      steps: 200
+      forget_max_length: 1024
+      retain_block: 1024
+    simnpo:
+      beta: 0.1
+      gamma: 0.0
+      forget_weight: 1.0
+      retain_weight: 1.0
+      forget_corpora:
+      - target_nld
+      retain_corpus: contrastive
+      min_len: 0
+      forget_max_length: 1024
+      retain_max_length: 1024
+      max_rows: 4000
+    train:
+      optim: adamw_torch
+      lr: 3.0e-05
+      max_steps: 200
+      num_epochs: 1000
+      batch_size: 1
+      grad_accum: 1
+      weight_decay: 0.0
+      max_grad_norm: 1.0
+      warmup_steps: null
+      bf16: false
+      gradient_checkpointing: false
+      log_every: 10
+  exports:
+  - id: equalbudget_simnpo_lr3e5_b01
+    eval_overrides:
+      condition: equalbudget_simnpo_lr3e5_b01
+    weights:
+      repo: thate10/rspd-gpt2-124m-trilingual-unlearned
+      subfolder: equalbudget_simnpo_lr3e5_b01
+      private: true
+    published:
+    - task: recovery/equalbudget_simnpo_lr3e5_b01
+      metric: M_tokens_tol1pct
+      value: 25067520.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+    - task: recovery/equalbudget_simnpo_lr3e5_b01
+      metric: M_tokens_tol0
+      value: 175472640.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+- id: equalbudget_rmu_s100_a100_lr5e4
+  method: rmu
+  label: RMU, s 100, α 100, lr 5e-4 (equal budget)
+  config:
+    name: gpt2_trilingual_equalbudget_rmu_s100_a100_lr5e4
+    model: models/recipes/gpt2_trilingual_base
+    dtype: float32
+    device_map: cuda
+    seed: 42
+    corpora:
+      target_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/target_nld.jsonl
+        text_field: text
+        topic: target
+      contrastive:
+        kind: local_jsonl
+        path:
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_eng.jsonl
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_deu.jsonl
+        text_field: text
+        topic: retain
+      heldout_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_nld.jsonl
+        text_field: text
+        topic: heldout
+      heldout_eng:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_eng.jsonl
+        text_field: text
+        topic: heldout
+      heldout_deu:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_deu.jsonl
+        text_field: text
+        topic: heldout
+    heldout:
+      rows: 32
+      max_length: 1024
+      tail:
+      - heldout_eng
+      - heldout_deu
+    budget:
+      target_passes: 200
+      retain_exposure_tokens: 1000000
+      steps: 200
+      forget_max_length: 1024
+      retain_block: 1024
+    rmu:
+      forget_corpora:
+      - target_nld
+      retain_corpora:
+      - contrastive
+      param_names:
+      - mlp.c_proj.weight
+      steering_coeffs:
+      - 100.0
+      alpha:
+      - 100.0
+      lr: 0.0005
+      max_num_batches: 1
+      batch_size: 1
+      epochs: 200
+      layer_id: 5
+      layer_ids:
+      - 3
+      - 4
+      - 5
+      position_ids_from_mask: true
+      min_len: 0
+      seed: 42
+      verbose: true
+  exports:
+  - id: equalbudget_rmu_s100_a100_lr5e4
+    eval_overrides:
+      condition: equalbudget_rmu_s100_a100_lr5e4
+    weights:
+      repo: thate10/rspd-gpt2-124m-trilingual-unlearned
+      subfolder: equalbudget_rmu_s100_a100_lr5e4
+      private: true
+    published:
+    - task: recovery/equalbudget_rmu_s100_a100_lr5e4
+      metric: M_tokens_tol1pct
+      value: 25067520.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+    - task: recovery/equalbudget_rmu_s100_a100_lr5e4
+      metric: M_tokens_tol0
+      value: 175472640.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+- id: equalbudget_rmu_s100_a100_lr1e4
+  method: rmu
+  label: RMU, s 100, α 100, lr 1e-4 (equal budget)
+  config:
+    name: gpt2_trilingual_equalbudget_rmu_s100_a100_lr1e4
+    model: models/recipes/gpt2_trilingual_base
+    dtype: float32
+    device_map: cuda
+    seed: 42
+    corpora:
+      target_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/target_nld.jsonl
+        text_field: text
+        topic: target
+      contrastive:
+        kind: local_jsonl
+        path:
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_eng.jsonl
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_deu.jsonl
+        text_field: text
+        topic: retain
+      heldout_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_nld.jsonl
+        text_field: text
+        topic: heldout
+      heldout_eng:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_eng.jsonl
+        text_field: text
+        topic: heldout
+      heldout_deu:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_deu.jsonl
+        text_field: text
+        topic: heldout
+    heldout:
+      rows: 32
+      max_length: 1024
+      tail:
+      - heldout_eng
+      - heldout_deu
+    budget:
+      target_passes: 200
+      retain_exposure_tokens: 1000000
+      steps: 200
+      forget_max_length: 1024
+      retain_block: 1024
+    rmu:
+      forget_corpora:
+      - target_nld
+      retain_corpora:
+      - contrastive
+      param_names:
+      - mlp.c_proj.weight
+      steering_coeffs:
+      - 100.0
+      alpha:
+      - 100.0
+      lr: 0.0001
+      max_num_batches: 1
+      batch_size: 1
+      epochs: 200
+      layer_id: 5
+      layer_ids:
+      - 3
+      - 4
+      - 5
+      position_ids_from_mask: true
+      min_len: 0
+      seed: 42
+      verbose: true
+  exports:
+  - id: equalbudget_rmu_s100_a100_lr1e4
+    eval_overrides:
+      condition: equalbudget_rmu_s100_a100_lr1e4
+    weights:
+      repo: thate10/rspd-gpt2-124m-trilingual-unlearned
+      subfolder: equalbudget_rmu_s100_a100_lr1e4
+      private: true
+    published:
+    - task: recovery/equalbudget_rmu_s100_a100_lr1e4
+      metric: M_tokens_tol1pct
+      value: 25067520.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+    - task: recovery/equalbudget_rmu_s100_a100_lr1e4
+      metric: M_tokens_tol0
+      value: 175472640.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+- id: equalbudget_rmu_s100_a10_lr1e4
+  method: rmu
+  label: RMU, s 100, α 10, lr 1e-4 (equal budget)
+  config:
+    name: gpt2_trilingual_equalbudget_rmu_s100_a10_lr1e4
+    model: models/recipes/gpt2_trilingual_base
+    dtype: float32
+    device_map: cuda
+    seed: 42
+    corpora:
+      target_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/target_nld.jsonl
+        text_field: text
+        topic: target
+      contrastive:
+        kind: local_jsonl
+        path:
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_eng.jsonl
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_deu.jsonl
+        text_field: text
+        topic: retain
+      heldout_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_nld.jsonl
+        text_field: text
+        topic: heldout
+      heldout_eng:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_eng.jsonl
+        text_field: text
+        topic: heldout
+      heldout_deu:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_deu.jsonl
+        text_field: text
+        topic: heldout
+    heldout:
+      rows: 32
+      max_length: 1024
+      tail:
+      - heldout_eng
+      - heldout_deu
+    budget:
+      target_passes: 200
+      retain_exposure_tokens: 1000000
+      steps: 200
+      forget_max_length: 1024
+      retain_block: 1024
+    rmu:
+      forget_corpora:
+      - target_nld
+      retain_corpora:
+      - contrastive
+      param_names:
+      - mlp.c_proj.weight
+      steering_coeffs:
+      - 100.0
+      alpha:
+      - 10.0
+      lr: 0.0001
+      max_num_batches: 1
+      batch_size: 1
+      epochs: 200
+      layer_id: 5
+      layer_ids:
+      - 3
+      - 4
+      - 5
+      position_ids_from_mask: true
+      min_len: 0
+      seed: 42
+      verbose: true
+  exports:
+  - id: equalbudget_rmu_s100_a10_lr1e4
+    eval_overrides:
+      condition: equalbudget_rmu_s100_a10_lr1e4
+    weights:
+      repo: thate10/rspd-gpt2-124m-trilingual-unlearned
+      subfolder: equalbudget_rmu_s100_a10_lr1e4
+      private: true
+    published:
+    - task: recovery/equalbudget_rmu_s100_a10_lr1e4
+      metric: M_tokens_tol1pct
+      value: 25067520.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+    - task: recovery/equalbudget_rmu_s100_a10_lr1e4
+      metric: M_tokens_tol0
+      value: 175472640.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+- id: equalbudget_kuda_tau1e2_lr3e4
+  method: kuda
+  label: KUDA, τ 1e-2, lr 3e-4 (equal budget)
+  config:
+    name: gpt2_trilingual_equalbudget_kuda_tau1e2_lr3e4
+    model: models/recipes/gpt2_trilingual_base
+    dtype: float32
+    device_map: cuda
+    seed: 42
+    corpora:
+      target_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/target_nld.jsonl
+        text_field: text
+        topic: target
+      contrastive:
+        kind: local_jsonl
+        path:
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_eng.jsonl
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_deu.jsonl
+        text_field: text
+        topic: retain
+      heldout_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_nld.jsonl
+        text_field: text
+        topic: heldout
+      heldout_eng:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_eng.jsonl
+        text_field: text
+        topic: heldout
+      heldout_deu:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_deu.jsonl
+        text_field: text
+        topic: heldout
+    heldout:
+      rows: 32
+      max_length: 1024
+      tail:
+      - heldout_eng
+      - heldout_deu
+    budget:
+      target_passes: 200
+      retain_exposure_tokens: 1000000
+      steps: 200
+      forget_max_length: 1024
+      retain_block: 1024
+    kuda:
+      beta: 2.0
+      tau: 0.01
+      alpha:
+      - 1.0
+      lr: 0.0003
+      batch_size: 1
+      max_num_batches: 1
+      epoch: 200
+      init_jitter: 0.0
+      layer_id: 6
+      layer_ids:
+      - 3
+      - 4
+      - 5
+      - 6
+      module_name: mlp.c_proj
+      position_ids_from_mask: true
+      forget_corpora:
+      - target_nld
+      retain_corpora:
+      - contrastive
+      min_len: 0
+      retain_max_length: 1024
+      nullspace:
+        sample_p: 100
+        max_cov_texts: null
+        max_length: 1024
+        batch_size: 8
+        svd_device: auto
+        cov_device: auto
+        cov_dtype: float32
+        use_cache: true
+  exports:
+  - id: equalbudget_kuda_tau1e2_lr3e4
+    eval_overrides:
+      condition: equalbudget_kuda_tau1e2_lr3e4
+    weights:
+      repo: thate10/rspd-gpt2-124m-trilingual-unlearned
+      subfolder: equalbudget_kuda_tau1e2_lr3e4
+      private: true
+    published:
+    - task: recovery/equalbudget_kuda_tau1e2_lr3e4
+      metric: M_tokens_tol1pct
+      value: 25067520.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+    - task: recovery/equalbudget_kuda_tau1e2_lr3e4
+      metric: M_tokens_tol0
+      value: 275742720.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+- id: equalbudget_kuda_tau1e2_lr1e3
+  method: kuda
+  label: KUDA, τ 1e-2, lr 1e-3 (equal budget)
+  config:
+    name: gpt2_trilingual_equalbudget_kuda_tau1e2_lr1e3
+    model: models/recipes/gpt2_trilingual_base
+    dtype: float32
+    device_map: cuda
+    seed: 42
+    corpora:
+      target_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/target_nld.jsonl
+        text_field: text
+        topic: target
+      contrastive:
+        kind: local_jsonl
+        path:
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_eng.jsonl
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_deu.jsonl
+        text_field: text
+        topic: retain
+      heldout_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_nld.jsonl
+        text_field: text
+        topic: heldout
+      heldout_eng:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_eng.jsonl
+        text_field: text
+        topic: heldout
+      heldout_deu:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_deu.jsonl
+        text_field: text
+        topic: heldout
+    heldout:
+      rows: 32
+      max_length: 1024
+      tail:
+      - heldout_eng
+      - heldout_deu
+    budget:
+      target_passes: 200
+      retain_exposure_tokens: 1000000
+      steps: 200
+      forget_max_length: 1024
+      retain_block: 1024
+    kuda:
+      beta: 2.0
+      tau: 0.01
+      alpha:
+      - 1.0
+      lr: 0.001
+      batch_size: 1
+      max_num_batches: 1
+      epoch: 200
+      init_jitter: 0.0
+      layer_id: 6
+      layer_ids:
+      - 3
+      - 4
+      - 5
+      - 6
+      module_name: mlp.c_proj
+      position_ids_from_mask: true
+      forget_corpora:
+      - target_nld
+      retain_corpora:
+      - contrastive
+      min_len: 0
+      retain_max_length: 1024
+      nullspace:
+        sample_p: 100
+        max_cov_texts: null
+        max_length: 1024
+        batch_size: 8
+        svd_device: auto
+        cov_device: auto
+        cov_dtype: float32
+        use_cache: true
+  exports:
+  - id: equalbudget_kuda_tau1e2_lr1e3
+    eval_overrides:
+      condition: equalbudget_kuda_tau1e2_lr1e3
+    weights:
+      repo: thate10/rspd-gpt2-124m-trilingual-unlearned
+      subfolder: equalbudget_kuda_tau1e2_lr1e3
+      private: true
+    published:
+    - task: recovery/equalbudget_kuda_tau1e2_lr1e3
+      metric: M_tokens_tol1pct
+      value: 50135040.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+    - task: recovery/equalbudget_kuda_tau1e2_lr1e3
+      metric: M_tokens_tol0
+      value: 325877760.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+- id: equalbudget_kuda_tau1e1_lr1e3
+  method: kuda
+  label: KUDA, τ 1e-1, lr 1e-3 (equal budget)
+  config:
+    name: gpt2_trilingual_equalbudget_kuda_tau1e1_lr1e3
+    model: models/recipes/gpt2_trilingual_base
+    dtype: float32
+    device_map: cuda
+    seed: 42
+    corpora:
+      target_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/target_nld.jsonl
+        text_field: text
+        topic: target
+      contrastive:
+        kind: local_jsonl
+        path:
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_eng.jsonl
+        - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_deu.jsonl
+        text_field: text
+        topic: retain
+      heldout_nld:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_nld.jsonl
+        text_field: text
+        topic: heldout
+      heldout_eng:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_eng.jsonl
+        text_field: text
+        topic: heldout
+      heldout_deu:
+        kind: local_jsonl
+        path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_deu.jsonl
+        text_field: text
+        topic: heldout
+    heldout:
+      rows: 32
+      max_length: 1024
+      tail:
+      - heldout_eng
+      - heldout_deu
+    budget:
+      target_passes: 200
+      retain_exposure_tokens: 1000000
+      steps: 200
+      forget_max_length: 1024
+      retain_block: 1024
+    kuda:
+      beta: 2.0
+      tau: 0.1
+      alpha:
+      - 1.0
+      lr: 0.001
+      batch_size: 1
+      max_num_batches: 1
+      epoch: 200
+      init_jitter: 0.0
+      layer_id: 6
+      layer_ids:
+      - 3
+      - 4
+      - 5
+      - 6
+      module_name: mlp.c_proj
+      position_ids_from_mask: true
+      forget_corpora:
+      - target_nld
+      retain_corpora:
+      - contrastive
+      min_len: 0
+      retain_max_length: 1024
+      nullspace:
+        sample_p: 100
+        max_cov_texts: null
+        max_length: 1024
+        batch_size: 8
+        svd_device: auto
+        cov_device: auto
+        cov_dtype: float32
+        use_cache: true
+  exports:
+  - id: equalbudget_kuda_tau1e1_lr1e3
+    eval_overrides:
+      condition: equalbudget_kuda_tau1e1_lr1e3
+    weights:
+      repo: thate10/rspd-gpt2-124m-trilingual-unlearned
+      subfolder: equalbudget_kuda_tau1e1_lr1e3
+      private: true
+    published:
+    - task: recovery/equalbudget_kuda_tau1e1_lr1e3
+      metric: M_tokens_tol1pct
+      value: 25067520.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+    - task: recovery/equalbudget_kuda_tau1e1_lr1e3
+      metric: M_tokens_tol0
+      value: 275742720.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+- id: srspd_sweep
+  method: srspd
+  label: SRSPD, 1,000-token Dutch target, 1M en/de retained set
+  config:
+    name: gpt2_trilingual_srspd_sweep
+    model: models/recipes/gpt2_trilingual_base
+    dtype: float32
+    device_map: cuda
+    seed: 42
+    data:
+      target:
+        corpora:
+        - target_nld
+        max_tokens: 1000
+        min_len: 0
+        max_length: 1024
+        heldout_rows: 32
+        heldout_from:
+        - heldout_nld
+      corpora:
+        target_nld:
+          kind: local_jsonl
+          path: datasets/gpt2_unlearning/gpt2_unlearning_1m/target_nld.jsonl
+          text_field: text
+          topic: target
+        contrastive:
+          kind: local_jsonl
+          path:
+          - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_eng.jsonl
+          - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_deu.jsonl
+          text_field: text
+          topic: retain
+        heldout_nld:
+          kind: local_jsonl
+          path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_nld.jsonl
+          text_field: text
+          topic: heldout
+        heldout_eng:
+          kind: local_jsonl
+          path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_eng.jsonl
+          text_field: text
+          topic: heldout
+        heldout_deu:
+          kind: local_jsonl
+          path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_deu.jsonl
+          text_field: text
+          topic: heldout
+      heldout_retain_corpora:
+      - heldout_eng
+      - heldout_deu
+      retain_max_length: 1024
+      heldout_mix_tokens: 0
+      retained:
+        buckets:
+        - name: contrastive_eng
+          kind: local_jsonl
+          path: datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_eng.jsonl
+          text_field: text
+          tokens: 500000
+        - name: contrastive_deu
+          kind: local_jsonl
+          path: datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_deu.jsonl
+          text_field: text
+          tokens: 500000
+        chunk_tokens: 1024
+        seed: 20260812
+        add_bos: true
+        chat_template: null
+    srspd:
+      solver: readout
+      ridge_rel: 1.0e-10
+      gram_budget_gib: 8.0
+      resume_from_cache: false
+      eig_extremes: true
+      lam_svd_dtype: float32
+      layers:
+        regex: (?:^|\.)h\.(\d+)\.(attn\.(?:c_attn|c_proj)|mlp\.(?:c_fc|c_proj))$
+      scratch_dir: null
+  legacy_counts:
+    n_x: 1000
+    n_y: 999424
+  exports:
+  - id: srspd_mu10
+    legacy:
+      mu_raw: 10.0
+    eval_overrides:
+      condition: srspd_mu10
+    weights:
+      repo: thate10/rspd-gpt2-124m-trilingual-unlearned
+      subfolder: srspd_mu10
+      private: true
+    published:
+    - task: recovery/srspd_mu10
+      metric: M_tokens_tol1pct
+      value: 50135040.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+    - task: recovery/srspd_mu10
+      metric: M_tokens_tol0
+      value: 325877760.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+- id: srspd_sweep2
+  method: srspd
+  label: SRSPD, 1,000-token Dutch target, 1M en/de retained set
+  config:
+    name: gpt2_trilingual_srspd_sweep2
+    model: models/recipes/gpt2_trilingual_base
+    dtype: float32
+    device_map: cuda
+    seed: 42
+    data:
+      target:
+        corpora:
+        - target_nld
+        max_tokens: 1000
+        min_len: 0
+        max_length: 1024
+        heldout_rows: 32
+        heldout_from:
+        - heldout_nld
+      corpora:
+        target_nld:
+          kind: local_jsonl
+          path: datasets/gpt2_unlearning/gpt2_unlearning_1m/target_nld.jsonl
+          text_field: text
+          topic: target
+        contrastive:
+          kind: local_jsonl
+          path:
+          - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_eng.jsonl
+          - datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_deu.jsonl
+          text_field: text
+          topic: retain
+        heldout_nld:
+          kind: local_jsonl
+          path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_nld.jsonl
+          text_field: text
+          topic: heldout
+        heldout_eng:
+          kind: local_jsonl
+          path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_eng.jsonl
+          text_field: text
+          topic: heldout
+        heldout_deu:
+          kind: local_jsonl
+          path: datasets/gpt2_unlearning/gpt2_unlearning_1m/heldout_deu.jsonl
+          text_field: text
+          topic: heldout
+      heldout_retain_corpora:
+      - heldout_eng
+      - heldout_deu
+      retain_max_length: 1024
+      heldout_mix_tokens: 0
+      retained:
+        buckets:
+        - name: contrastive_eng
+          kind: local_jsonl
+          path: datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_eng.jsonl
+          text_field: text
+          tokens: 500000
+        - name: contrastive_deu
+          kind: local_jsonl
+          path: datasets/gpt2_unlearning/gpt2_unlearning_1m/contrastive_deu.jsonl
+          text_field: text
+          tokens: 500000
+        chunk_tokens: 1024
+        seed: 20260812
+        add_bos: true
+        chat_template: null
+    srspd:
+      solver: readout
+      ridge_rel: 1.0e-10
+      gram_budget_gib: 8.0
+      resume_from_cache: false
+      eig_extremes: true
+      lam_svd_dtype: float32
+      layers:
+        regex: (?:^|\.)h\.(\d+)\.(attn\.(?:c_attn|c_proj)|mlp\.(?:c_fc|c_proj))$
+      scratch_dir: null
+  legacy_counts:
+    n_x: 1000
+    n_y: 999424
+  exports:
+  - id: srspd_mu30
+    legacy:
+      mu_raw: 30.0
+    eval_overrides:
+      condition: srspd_mu30
+    weights:
+      repo: thate10/rspd-gpt2-124m-trilingual-unlearned
+      subfolder: srspd_mu30
+      private: true
+    published:
+    - task: recovery/srspd_mu30
+      metric: M_tokens_tol1pct
+      value: 100270080.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+    - task: recovery/srspd_mu30
+      metric: M_tokens_tol0
+      value: 426147840.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+  - id: srspd_mu50
+    legacy:
+      mu_raw: 50.0
+    eval_overrides:
+      condition: srspd_mu50
+    weights:
+      repo: thate10/rspd-gpt2-124m-trilingual-unlearned
+      subfolder: srspd_mu50
+      private: true
+    published:
+    - task: recovery/srspd_mu50
+      metric: M_tokens_tol1pct
+      value: 175472640.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
+    - task: recovery/srspd_mu50
+      metric: M_tokens_tol0
+      value: 526417920.0
+      rel_tol: 0.5
+      note: stochastic retraining at 25M-token evaluation granularity
