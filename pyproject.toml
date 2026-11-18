@@ -16,6 +16,7 @@ experiments = ["transformers", "safetensors", "accelerate", "datasets", "pyyaml"
 eval = ["lm_eval==0.4.12", "vllm==0.26.0"]
 muse = ["rouge_score", "scikit-learn", "scipy"]
 test = ["pytest", "numpy"]
+examples = ["matplotlib", "nbformat", "nbclient", "ipykernel"]
 
 [project.scripts]
 rspd = "rspd.cli:main"
