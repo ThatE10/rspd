@@ -1,44 +1,86 @@
 # rspd
 
-Closed-form selective erasure of behaviour from a model's linear layers, by subtraction.
+**Find the part of a model's weights that one behaviour uses and another does not, in closed form, and take it out.**
 
-For each edited weight `W`, with `X` the activations of the behaviour to erase (the **target** set)
-and `Y` the activations of the behaviour to keep (the **retained** set), SRSPD computes the
-erased component
+<p align="center">
+  <img src="assets/demo.gif" alt="A point moves through two overlapping sets X and Y in an input activation space. The layer W carries the whole space across. The component M carries only what X alone uses." width="640">
+</p>
 
-    M = W XᵀX (XᵀX + μ YᵀY)⁺
+> **Status.** Currently implements the supervised variant (SRSPD). The unsupervised variant is coming soon — end of 2026!
 
-and writes `W_new = W − M`. There is no gradient descent. The dose is given as `mu_per_token`.
-Every edited matrix reports its leaks, which measure how well the target and retained sets
-are disentangled.
+## Install
 
-This repository holds two distributions:
+```bash
+pip install rspd
+```
 
-| distribution | path | what it is |
+`rspd` needs only `torch`. Add `rspd[hf]` to work on Hugging Face models, and `rspd[experiments]` for the data builders, baselines and evaluation used in the experiments.
+
+## Quickstart
+
+```python runnable
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from rspd import SRSPD
+
+model = AutoModelForCausalLM.from_pretrained("gpt2")
+tokenizer = AutoTokenizer.from_pretrained("gpt2")
+dutch, english = ["De kat zit op de mat."], ["The cat sits on the mat."]  # your two sets of text
+
+srspd = SRSPD(model, tokenizer)                    # attach
+components = srspd.fit(target=dutch, retained=english, mu_per_token=1.0)
+components.apply()                                 # W <- W - M in every layer
+components.restore()                               # bit-for-bit undo
+```
+
+`target` is the behaviour to remove and `retained` is the behaviour to keep; in practice each is a few thousand tokens or more. `fit` does not change the model. It returns one `Component` per weight matrix, with its factors `A` and `B` (`M = A @ B`) and its leaks. `mu_per_token` is the dose: larger removes more.
+
+## How it works
+
+A linear layer only ever acts on the activations it is given. For a set of activations `X`, the layer's response is `W X`, and
+
+```
+rank(W X) ≤ min(rank(W), rank(X))
+```
+
+So however large `W` is, the part of it that a behaviour uses is no bigger than that behaviour's activations. RSPD reads that part off the activations themselves instead of off the weights. This is the idea behind parameter decomposition, which inspired the technique: a network's weights are a sum of components, each doing one thing.
+
+SRSPD, the supervised variant, takes two sets of activations: a **target** `X` to remove and a **retained** set `Y` to keep. It asks for the component `M` that reproduces the layer on the target and is as quiet as possible on the retained set:
+
+```
+M = argmin  ‖W Xᵀ − M Xᵀ‖² + μ ‖M Yᵀ‖²        which has the closed form        M = W XᵀX (XᵀX + μ YᵀY)⁺
+```
+
+(Activations are stored one per row, hence the transposes.) There is no training. The solve needs one pass over each set to collect activations and one factorisation per layer input. Subtracting the component, `W ← W − M`, removes the target behaviour and leaves the retained one in place; adding it back restores the model exactly.
+
+Every fit also measures its **leaks** for each matrix: how much of the layer's response to the target survives the subtraction, and how much of its response to the retained set was disturbed. The full derivation is in [`docs/math.md`](docs/math.md).
+
+## Examples
+
+| | | |
 | --- | --- | --- |
-| `rspd` | `packages/rspd` | the slim core: solve, COALA truncation, edit, leaks, Gram streaming, HF model capture |
-| `rspd[experiments]` | `packages/rspd[experiments]` | data builders, evaluation, baseline methods, reproduction recipes |
+| [Quickstart on a toy](examples/quickstart.ipynb) | Two overlapping sets and one layer, small enough to see whole. CPU, a few seconds. | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ThatE10/rspd/blob/main/examples/quickstart.ipynb) |
+| [Erase Dutch from an open language model](examples/erase_dutch.ipynb) | Remove one language from a model and keep the others, on a free Colab GPU. No account needed. | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ThatE10/rspd/blob/main/examples/erase_dutch.ipynb) |
 
-Status: private, pre-release; there is no public release (`docs/releasing.md`). Work is
-tracked in this repository's issues.
+The animation at the top is drawn from a real solve on the toy: `python assets/make_demo.py`.
 
 ## Documentation
 
-| file | for |
-| --- | --- |
-| `AGENTS.md` | agents (and anyone new): the five convention rules, the dose, the standard workflow, the report, failure modes |
-| `docs/usage.md`, `docs/experiments.md` | install, extras, minimal examples, supported models, credits |
-| `docs/math.md` | the method: objective, closed forms, leaks, specificity, the dose derivation, COALA truncation |
-| `docs/api.md` | every public symbol and CLI option of both packages |
-| `docs/releasing.md` | wheels, tags, pinning from another repository |
-| `docs/agent_acceptance.md` | the fresh-agent check `AGENTS.md` must pass |
+- [`docs/usage.md`](docs/usage.md): install options, supported model families, the command line.
+- [`docs/math.md`](docs/math.md): the objective, the closed forms, leaks, the dose, rank truncation.
+- [`docs/api.md`](docs/api.md): every public name.
+- [`docs/experiments.md`](docs/experiments.md): `rspd[experiments]`.
+- [`AGENTS.md`](AGENTS.md): the conventions and the full workflow, written for coding agents.
 
-Tests (both packages, including the documentation tests), from the repository root:
+## Citation
 
-    PYTHONPATH=src:packages/rspd[experiments]/src python -m pytest -q
+If you use `rspd`, please cite it. [`CITATION.cff`](CITATION.cff) has the machine-readable form.
 
-## Credits
+```bibtex
+@software{rspd,
+  title = {rspd: Representation-Space Parameter Decomposition},
+  url   = {https://github.com/ThatE10/rspd},
+  year  = {2026}
+}
+```
 
-Rank truncation and compression use the context-aware projector of **COALA**:
-Parkina & Rakhuba, *COALA: Numerically Stable and Efficient Framework for Context-Aware
-Low-Rank Approximation*, arXiv:2507.07580 (NeurIPS 2025). See `CITATION.cff`.
+Rank truncation uses the context-aware projector of COALA: Parkina and Rakhuba, *COALA: Numerically Stable and Efficient Framework for Context-Aware Low-Rank Approximation*, arXiv:2507.07580 (NeurIPS 2025).
