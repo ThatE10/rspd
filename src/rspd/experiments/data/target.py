@@ -1,6 +1,6 @@
 """The SRSPD data path: the target ``X`` (rows or official windows of
 registered corpora), the retained ``Y`` (a :mod:`retained_corpus` build), and
-the held-out readouts, as token ids ready for :func:`rspd.erase`.
+the held-out readouts, as token ids ready for :func:`rspd.api.erase`.
 
 :func:`build_erasure_data` is the one entry point; it reproduces, step for
 step, the data path every published SRSPD run used:
@@ -200,7 +200,7 @@ class ErasureData:
 
     ``target_ids`` -- list of ``[1, T]`` LongTensors (``X``, one sequence each);
     ``retained_ids`` -- ``[n_chunks, chunk_tokens]`` int32 (``Y``; pass
-    ``list(retained_ids.long())`` or the tensor itself to :func:`rspd.erase`,
+    ``list(retained_ids.long())`` or the tensor itself to :func:`rspd.api.erase`,
     which runs one forward per row); ``heldout_ids`` -- ``{readout key: [ids,
     ...]}`` (empty readouts dropped); ``manifest`` -- the provenance record
     (target row counts and sha256, token counts, the retained manifest and its

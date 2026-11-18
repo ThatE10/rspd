@@ -1,7 +1,7 @@
 """The retained corpus: documents streamed from the HF hub (or read from local
 JSONL) to an exact token budget per bucket, packed into equal chunks.
 
-This is ``Y`` for :func:`rspd.erase` -- the behaviour the edit must leave
+This is ``Y`` for :func:`rspd.api.erase` -- the behaviour the edit must leave
 alone -- and its provenance is the product: a retained set that cannot be
 rebuilt makes a result irreproducible, so the builder is organised around a
 content hash.

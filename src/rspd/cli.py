@@ -34,7 +34,7 @@ __all__ = ["main", "parse_layers"]
 
 
 def parse_layers(spec):
-    """The ``--layers`` string -> the ``layers=`` argument of :func:`rspd.erase`."""
+    """The ``--layers`` string -> the ``layers=`` argument of :func:`rspd.api.erase`."""
     if spec is None:
         return None
     s = spec.strip()
@@ -88,7 +88,7 @@ def _cmd_inspect(a):
 
 
 def _check_apply_choice(a):
-    """The CLI's own wording of :func:`rspd.erase`'s apply checks, raised
+    """The CLI's own wording of :func:`rspd.api.erase`'s apply checks, raised
     before any model is loaded."""
     doses = sorted({float(m) for m in a.mu_per_token})
     rules = []

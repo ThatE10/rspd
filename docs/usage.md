@@ -29,7 +29,7 @@ pip install "rspd[hf] @ git+https://github.com/ThatE10/rspd@<sha>"
 | extra | adds | needed for |
 | --- | --- | --- |
 | (none) | `torch>=2.0` | the tensor API: solve, truncation, `apply_erasure`, leaks, dose, COALA |
-| `hf` | `transformers`, `safetensors` | `rspd.erase` / `inspect_model` / export on Hugging Face models, the `rspd` CLI |
+| `hf` | `transformers`, `safetensors` | `rspd.api.erase` / `inspect_model` / export on Hugging Face models, the `rspd` CLI |
 | `test` | `pytest`, `numpy` | the test suite |
 
 `import rspd` needs only `torch`; `transformers` is imported where it is used. Building a
@@ -51,13 +51,13 @@ target = torch.randint(4, 66, (3, 24))     # X: token ids of the behaviour to er
 retained = torch.randint(66, 128, (6, 32)) # Y: token ids of the behaviour to keep
 
 print(rspd.inspect_model(model)["totals"])               # what would be edited, Gram bytes
-report = rspd.erase(model, target=target, retained=retained,
+report = rspd.api.erase(model, target=target, retained=retained,
                      mu_per_token=[0.3, 1.0, 3.0], apply_mu_per_token=1.0)
 print(report.matrices["L01.mlp.c_fc"]["L_X_rel"],         # leaks of every edited matrix
       report.matrices["L01.mlp.c_fc"]["L_Y_rel"])
 report.apply_dose(3.0)                     # re-dose without a second pass over the data
 rspd.export_checkpoint(model, None, tempfile.mkdtemp())  # save the edited model
-rspd.restore(model)                       # bit for bit
+rspd.api.restore(model)                       # bit for bit
 report.close()
 ```
 
@@ -65,10 +65,10 @@ On raw tensors:
 
 ```python runnable
 W, X, Y = torch.randn(8, 6), torch.randn(40, 6), torch.randn(200, 6)
-dose = rspd.dose_from_mu_per_token(1.0, n_x=X.shape[0], n_y=Y.shape[0])
-comp = rspd.erased_component(W, X, Y, mu=dose.mu)
-W_new = rspd.apply_erasure(W, comp)                      # W − M, the only edit
-print(rspd.leaks(W, comp, X, Y)["L_X_rel"], dose.as_dict())
+dose = rspd.core.dose_from_mu_per_token(1.0, n_x=X.shape[0], n_y=Y.shape[0])
+comp = rspd.core.erased_component(W, X, Y, mu=dose.mu)
+W_new = rspd.core.apply_erasure(W, comp)                      # W − M, the only edit
+print(rspd.core.leaks(W, comp, X, Y)["L_X_rel"], dose.as_dict())
 ```
 
 Command line (`[hf]` extra), each command printing one JSON document:

@@ -33,10 +33,10 @@ Two uses in this package
 ------------------------
 1. **Erasure rank truncation** acts on the erased component ``M``, never on
    ``W``: ``M_r = U_r U_r^T M`` with ``U_r`` from the response ``M X^T`` on the
-   target set (:func:`rspd.truncate_component`,
-   :func:`rspd.erased_component_gram` with ``rank`` / ``lam`` / ``lam_rel``).
+   target set (:func:`rspd.core.truncate_component`,
+   :func:`rspd.core.erased_component_gram` with ``rank`` / ``lam`` / ``lam_rel``).
    That is COALA applied to ``M`` over ``X``; both call :func:`coala_basis`,
-   and the edit is still ``W_new = W - M_r`` (:func:`rspd.apply_erasure`).
+   and the edit is still ``W_new = W - M_r`` (:func:`rspd.core.apply_erasure`).
 2. **Compression** (:func:`compress_factors`, :func:`materialize_compressed`,
    :func:`compress_weight`) applies the projector to ``W`` itself and the
    rank-``r`` surrogate REPLACES the weight. This is the only legitimate weight
@@ -100,7 +100,7 @@ def compress_factors(W: torch.Tensor, A: torch.Tensor, T: torch.Tensor):
     """``(A_fac, B_fac, sigma)`` for compressing ``W`` on its inputs ``A``
     (response ``T = A @ W.T``): :func:`fit_coala`. The prefix
     ``A_fac[:, :r] @ B_fac[:r]`` is the rank-``r`` replacement. Compression
-    only -- an erasure edit is ``W - M`` (:func:`rspd.apply_erasure`)."""
+    only -- an erasure edit is ``W - M`` (:func:`rspd.core.apply_erasure`)."""
     return fit_coala(W, A, T)
 
 

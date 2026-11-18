@@ -11,7 +11,7 @@ nuclear norm) and define
 Properties: ``1 <= erank(A) <= rank(A)``, with equality at ``rank(A)`` iff the
 nonzero singular values are all equal, and invariance to scalar rescaling of
 ``A``. The value is real (not an integer); callers that need an integer cutoff
-round it themselves (:func:`rspd.solve.erank_truncation_rank`).
+round it themselves (:func:`rspd.core.solve.erank_truncation_rank`).
 """
 from __future__ import annotations
 
@@ -64,7 +64,7 @@ def effective_rank_from_singular_values(sigma: torch.Tensor) -> float:
     ``exp(-sum_i p_i ln p_i)``, ``p_i = s_i / sum_j s_j`` (the singular values
     normalised by the nuclear norm -- NOT ``s_i^2 / sum s_j^2``), ``0 ln 0 :=
     0``. Raises ``ValueError`` on an empty, non-finite or all-zero spectrum.
-    Callers that already hold a spectrum (:func:`rspd.truncate_component`)
+    Callers that already hold a spectrum (:func:`rspd.core.truncate_component`)
     use this so no second SVD is taken and no second definition exists."""
     s = torch.as_tensor(sigma).detach()
     if s.ndim != 1:

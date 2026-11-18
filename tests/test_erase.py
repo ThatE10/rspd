@@ -1,4 +1,4 @@
-"""``rspd.solve`` -- erase by subtraction, the core table as tests.
+"""``rspd.core.solve`` -- erase by subtraction, the core table as tests.
 
 CPU, float64, no model. X = TARGET (erased), Y = RETAINED (kept), batch-first.
 
@@ -23,8 +23,8 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from rspd import solve as erase  # noqa: E402
-from rspd.solve import (CORE_TABLE, ErasedComponent, ErasureConventionError,  # noqa: E402
+from rspd.core import solve as erase  # noqa: E402
+from rspd.core.solve import (CORE_TABLE, ErasedComponent, ErasureConventionError,  # noqa: E402
                         KeptMap, apply_erasure, erased_component, erased_component_gram,
                         kept_map, kept_map_gram, leaks, leaks_gram, readout_gram)
 
@@ -248,7 +248,7 @@ def test_specificity_matches_generalized_eigensolve():
 # --------------------------------------------------------------------------- #
 # the two-Gram form: a target too large to hold                               #
 # --------------------------------------------------------------------------- #
-from rspd.solve import erased_component_grams, factor_grams, leaks_grams  # noqa: E402
+from rspd.core.solve import erased_component_grams, factor_grams, leaks_grams  # noqa: E402
 
 GRAM_MUS = [0.01, 1.0, 100.0]
 GRAM_RIDGES = [0.0, 1e-10, 1e-6]

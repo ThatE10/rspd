@@ -1,6 +1,6 @@
 """Method runners: SRSPD and the unlearning baselines it is compared against.
 
-* :mod:`.srspd` -- data spec -> :func:`rspd.erase` (both solvers, rank rules,
+* :mod:`.srspd` -- data spec -> :func:`rspd.api.erase` (both solvers, rank rules,
   a list of ``mu_per_token``) -> one export and held-out readout per dose;
 * :mod:`.rmu` -- RMU (Li et al., arXiv:2403.03218; port of
   github.com/centerforaisafety/wmdp, MIT);

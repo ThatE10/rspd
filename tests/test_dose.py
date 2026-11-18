@@ -1,5 +1,5 @@
-"""``rspd.dose``: the dose conversions and the per-direction erased fraction
-``f = gamma m / (1 + gamma m)`` that :func:`rspd.suggest_mu_per_token` inverts."""
+"""``rspd.core.dose``: the dose conversions and the per-direction erased fraction
+``f = gamma m / (1 + gamma m)`` that :func:`rspd.core.suggest_mu_per_token` inverts."""
 from __future__ import annotations
 
 import math
@@ -10,8 +10,8 @@ torch = pytest.importorskip("torch")
 np = pytest.importorskip("numpy")
 
 import rspd  # noqa: E402
-from rspd import Dose, dose_from_mu_per_token, specificity, suggest_mu_per_token  # noqa: E402
-from rspd.dose import erased_fraction  # noqa: E402
+from rspd.core import Dose, dose_from_mu_per_token, specificity, suggest_mu_per_token  # noqa: E402
+from rspd.core.dose import erased_fraction  # noqa: E402
 
 
 @pytest.mark.parametrize("m,n_x,n_y", [(0.7, 40, 300), (1.0, 1000, 1000), (3e-3, 7, 123456)])
@@ -75,7 +75,7 @@ def test_full_spectrum_flag_keeps_the_summary():
     b = specificity(Y.T @ Y, X, Y.shape[0], k=3, full=True)
     assert "spectrum" not in a and {k: b[k] for k in a} == a
     assert len(b["spectrum"]) == b["n"] == 5
-    assert rspd.solve.specificity_gram is specificity
+    assert rspd.core.solve.specificity_gram is specificity
 
 
 @pytest.mark.parametrize("fractions,quantiles", [((0.1, 0.5, 0.9), (0.5, 0.9, 0.99)),

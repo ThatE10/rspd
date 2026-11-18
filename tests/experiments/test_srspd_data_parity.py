@@ -9,7 +9,7 @@ the token streams it feeds its Gram passes captured. The SAME config is then
 translated by :func:`rspd.experiments.recipes.legacy.srspd_config_from_legacy`
 and run through :func:`rspd.experiments.data.build_erasure_data` +
 :func:`rspd.experiments.methods.srspd.run` on an identical model, with the
-streams :func:`rspd.erase` receives captured, under a separate data root (so
+streams :func:`rspd.api.erase` receives captured, under a separate data root (so
 neither side can read the other's retained-corpus cache).
 
 Asserted: the target and retained token streams are identical sequence for
@@ -133,7 +133,7 @@ def _capture_driver_streams(monkeypatch, drv):
 
 def _capture_package_streams(monkeypatch):
     import rspd
-    real = rspd.erase
+    real = rspd.api.erase
     seen = []
 
     def spy(model, *a, target, retained, **kw):
@@ -142,7 +142,7 @@ def _capture_package_streams(monkeypatch):
                      "kw": dict(kw)})
         return real(model, *a, target=target, retained=retained, **kw)
 
-    monkeypatch.setattr(rspd, "erase", spy)
+    monkeypatch.setattr(rspd.api, "erase", spy)
     return seen
 
 

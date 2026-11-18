@@ -34,7 +34,7 @@ sequence, ``[B, T]`` B sequences), a list of 1-D tensors / int lists, or (with
 ``tokenizer``) strings. Each sequence is its own forward pass (no padding).
 ``X`` is every token of ``target``, ``Y`` every token of ``retained``;
 ``n_x`` / ``n_y`` are their token counts and the dose is resolved with
-:func:`rspd.dose_from_mu_per_token`.
+:func:`rspd.core.dose_from_mu_per_token`.
 """
 from __future__ import annotations
 
@@ -52,12 +52,13 @@ import torch
 
 from .capture.grams import MemorySpill, TensorSpill, gram_bytes
 from .capture.hf import harvest_inputs_concat
-from .dose import dose_from_mu_per_token
+from .core.dose import dose_from_mu_per_token
 from .models.harness import HFLinearHarness, group_by_input, key_layer
 from .models.pristine import PristineStore
 from .models.quirks import detect_quirks
 from .models.selector import resolve_selector
 from .pipeline import (CONVENTION, SOLVERS, LEAK_FIELDS, SolveState, apply_dose,
+                       build_component,
                        check_scratch_space, leaks_per_matrix, rank_rule_spec, run_gram_passes,
                        scratch_bytes_needed, summarize_by_type)
 
@@ -239,7 +240,7 @@ def _held_error(holder, me=None):
     who = "" if me is None else f", not by this report ({me.describe()})"
     return RuntimeError(
         f"this model carries an applied erasure held by {holder.describe()}{who}: call "
-        f"rspd.restore(model) (or that report's close()) first so the solve starts from "
+        f"rspd.api.restore(model) (or that report's close()) first so the solve starts from "
         f"the pristine weights; applying on top would stack two edits")
 
 
@@ -262,7 +263,7 @@ class EditReport:
     convention : the edit convention (``W_new = W - M``; X target, Y retained).
     solver : ``"readout"`` | ``"grams"``.
     applied : whether an edit is currently applied by this report.
-    dose : the applied dose, :meth:`rspd.dose.Dose.as_dict` (``mu_per_token``,
+    dose : the applied dose, :meth:`rspd.core.dose.Dose.as_dict` (``mu_per_token``,
         the derived weights, ``n_x``, ``n_y``, ``formula``), or ``None``.
     doses : every solved dose, same form.
     rank_rule : the truncation rule of the applied edit (``None`` = full rank,
@@ -289,7 +290,7 @@ class EditReport:
     specificity : per input key; ``specificity[key]["specificity"]`` holds the
         top eight ``gamma`` and, with ``erase(..., spectrum="full")``, the whole
         spectrum under ``"spectrum"`` (pass the entry, or :meth:`spectrum`, to
-        :func:`rspd.suggest_mu_per_token`).
+        :func:`rspd.core.suggest_mu_per_token`).
     warnings : strings; non-PD solves are ONE summary warning per run.
     non_pd : one record per (matrix, dose) whose ``G_mu`` was not numerically
         PD at the requested ridge: ``{matrix, input_key, mu_per_token,
@@ -340,7 +341,7 @@ class EditReport:
     def _need_session(self):
         if self._session is None or self._session.closed:
             raise RuntimeError("this EditReport has no live solve attached (it was loaded "
-                               "from JSON or closed); re-run rspd.erase")
+                               "from JSON or closed); re-run rspd.api.erase")
         return self._session
 
     def apply_dose(self, mu_per_token, rule=None) -> "EditReport":
@@ -384,7 +385,7 @@ class EditReport:
     def spectrum(self, name) -> list:
         """The full ``gamma`` spectrum (descending) of input key or matrix
         ``name``; needs ``erase(..., spectrum="full")``. Feed it to
-        :func:`rspd.suggest_mu_per_token`."""
+        :func:`rspd.core.suggest_mu_per_token`."""
         key = name if name in self.specificity else (self.matrices.get(name) or {}).get(
             "input_key")
         if key not in self.specificity:
@@ -393,7 +394,7 @@ class EditReport:
         spec = self.specificity[key].get("specificity") or {}
         if "spectrum" not in spec:
             raise ValueError("this report keeps only the top gamma values; re-run "
-                             "rspd.erase(..., spectrum='full') (readout solver)")
+                             "rspd.api.erase(..., spectrum='full') (readout solver)")
         return list(spec["spectrum"])
 
 
@@ -507,7 +508,7 @@ def erase(model, tokenizer=None, *, target, retained, mu_per_token, apply=True,
     target, retained : token ids (see the module docstring); ``X`` and ``Y``.
     mu_per_token : the dose, a number > 0 or a list of them (``1 / mu_per_token``
         is the per-token Lagrange multiplier on the retained disturbance; larger
-        erases more). See :mod:`rspd.dose`.
+        erases more). See :mod:`rspd.core.dose`.
     apply, apply_mu_per_token, apply_rank_rule : which solved ``(dose, rule)``
         setting to apply (module docstring). ``apply_rank_rule`` is ``None``
         (the full-rank edit) or one of the solved rules; it may be left out
@@ -544,7 +545,7 @@ def erase(model, tokenizer=None, *, target, retained, mu_per_token, apply=True,
         brackets exactly ``x W^T`` (rel. tol 1e-2).
     spectrum : ``"top"`` (default: the top eight ``gamma`` per input key) or
         ``"full"`` (also the whole spectrum, ``specificity[key]["specificity"]
-        ["spectrum"]``, ready for :func:`rspd.suggest_mu_per_token`; readout
+        ["spectrum"]``, ready for :func:`rspd.core.suggest_mu_per_token`; readout
         solver only).
 
     Returns
@@ -703,6 +704,90 @@ def erase(model, tokenizer=None, *, target, retained, mu_per_token, apply=True,
     if bad:
         report.warnings.append(f"non-finite leaks for {bad[:6]}")
     return report
+
+
+class _FitBackend:
+    """What :class:`rspd.core.Components` needs from a live fit: the component
+    of a matrix at a setting, the leaks, apply / restore / close. A setting is
+    ``(mu_per_token, rank_rule)``."""
+
+    def __init__(self, report):
+        self.report = report
+
+    def _session(self):
+        return self.report._need_session()
+
+    def _indices(self, setting):
+        s = self._session()
+        m, rule = setting
+        di = [i for i, d in enumerate(s.state.doses) if d.mu_per_token == float(m)]
+        if not di:
+            raise ValueError(f"mu_per_token {m!r} was not solved; solved: "
+                             f"{[d.mu_per_token for d in s.state.doses]}")
+        ri = _rule_index(s.rules, rule, "rank_rule")
+        return s, di[0], ri
+
+    def resolve(self, setting, settings):
+        """A bare ``mu_per_token`` names that dose at the default rank rule (the
+        one solved rule, else full rank)."""
+        try:
+            m = float(setting)
+        except (TypeError, ValueError):
+            raise ValueError(f"setting {setting!r} was not solved; solved: {settings}") from None
+        rules = self._session().rules
+        want = (m, rules[0] if len(rules) == 1 else None)
+        if want not in settings:
+            raise ValueError(f"mu_per_token {setting!r} was not solved; solved settings "
+                             f"(mu_per_token, rank_rule): {settings}")
+        return want
+
+    def component(self, name, _index, setting):
+        from .core.types import Component
+        s, di, ri = self._indices(setting)
+        li = None if ri is None else s.lam_index_of[(di, ri)]
+        key = next(k for k, members in s.state.key_members.items() if name in members)
+        Wf = s.store.pristine(name, dtype=torch.float32)
+        comp = build_component(s.state, key, name, Wf, di, li)
+        row = (s.state.diag_by_dose[di] if li is None else s.state.lam_info[li])[name]
+        info = dict(comp.info, name=name, mu_per_token=float(setting[0]), rank_rule=setting[1],
+                    leaks={f: row.get(f) for f in LEAK_FIELDS},
+                    **{f: row.get(f) for f in ("erank", "solve_path", "ridge_delta")
+                       if f in row})
+        return Component(comp.A, comp.B, info)
+
+    def leaks(self, setting) -> dict:
+        s, di, ri = self._indices(setting)
+        li = None if ri is None else s.lam_index_of[(di, ri)]
+        rows = _ordered(s.h, s.state.diag_by_dose[di] if li is None else s.state.lam_info[li])
+        return {n: {f: r.get(f) for f in LEAK_FIELDS} for n, r in rows.items()}
+
+    def applied_setting(self):
+        s = self.report._session
+        return None if s is None or s.closed else s.applied_setting
+
+    def apply(self, setting):
+        s, di, ri = self._indices(setting)
+        _apply_setting(self.report, s, di, ri)
+
+    def restore(self) -> list:
+        return self.report.restore()
+
+    def close(self) -> None:
+        self.report.close()
+
+
+def components_of(report: EditReport):
+    """The :class:`rspd.core.Components` of a live :class:`EditReport`: one
+    :class:`rspd.core.Component` per edited matrix, in block order, at every
+    solved ``(mu_per_token, rank_rule)`` setting."""
+    from .core.types import Components
+    s = report._need_session()
+    names = list(_ordered(s.h, s.state.diag_by_dose[0]))
+    settings = [(x["mu_per_token"], x["rank_rule"]) for x in report.settings]
+    default = (settings[0][0], s.rules[0] if len(s.rules) == 1 else None)
+    current = s.applied_setting or default
+    return Components(names, backend=_FitBackend(report), settings=settings, setting=current,
+                      report=report)
 
 
 def restore(model) -> list:

@@ -37,9 +37,9 @@ def test_older_open_report_cannot_stack_a_second_edit():
     model = tm.gpt2()
     target, retained = _sets()
     pristine = _params(model)
-    old = rspd.erase(model, target=target, retained=retained, layers=LAYERS,
+    old = rspd.api.erase(model, target=target, retained=retained, layers=LAYERS,
                       mu_per_token=[0.3, 1.0], apply=False)        # still open, unapplied
-    new = rspd.erase(model, target=target, retained=retained, layers=LAYERS,
+    new = rspd.api.erase(model, target=target, retained=retained, layers=LAYERS,
                       mu_per_token=1.0)                              # holds the model
     assert new.applied
     edited = _params(model)
@@ -48,51 +48,51 @@ def test_older_open_report_cannot_stack_a_second_edit():
         old.apply_dose(1.0)
     assert _bitwise(model, edited) and not old.applied             # nothing was stacked
     with pytest.raises(RuntimeError, match=r"carries an applied erasure held by EditReport"):
-        rspd.erase(model, target=target, retained=retained, layers=LAYERS, mu_per_token=1.0)
-    names = rspd.restore(model)                                     # the holder's edit
+        rspd.api.erase(model, target=target, retained=retained, layers=LAYERS, mu_per_token=1.0)
+    names = rspd.api.restore(model)                                     # the holder's edit
     assert names == sorted(new.matrices) and not new.applied
     assert _bitwise(model, pristine)
     old.apply_dose(0.3)                                              # lock released: allowed
     assert old.applied
     with pytest.raises(RuntimeError, match="held by EditReport"):
         new.apply_dose(1.0)
-    assert sorted(rspd.restore(model)) == sorted(old.matrices) and not old.applied
-    assert _bitwise(model, pristine) and rspd.restore(model) == []
-    fresh = rspd.erase(model, target=target, retained=retained, layers=LAYERS,
+    assert sorted(rspd.api.restore(model)) == sorted(old.matrices) and not old.applied
+    assert _bitwise(model, pristine) and rspd.api.restore(model) == []
+    fresh = rspd.api.erase(model, target=target, retained=retained, layers=LAYERS,
                         mu_per_token=1.0)                            # from pristine weights
     assert _bitwise(model, edited)
     fresh.close()
     old.close()
     new.close()
-    assert _bitwise(model, pristine) and rspd.restore(model) == []
+    assert _bitwise(model, pristine) and rspd.api.restore(model) == []
 
 
 def test_full_spectrum_feeds_suggest_mu_per_token():
     model = tm.gpt2()
     target, retained = _sets()
-    top = rspd.erase(model, target=target, retained=retained, layers=LAYERS,
+    top = rspd.api.erase(model, target=target, retained=retained, layers=LAYERS,
                       mu_per_token=1.0, apply=False)
     key = next(iter(top.specificity))
     assert "spectrum" not in top.specificity[key]["specificity"]        # default unchanged
     with pytest.raises(ValueError, match="spectrum='full'"):
         top.spectrum(key)
     top.close()
-    rep = rspd.erase(model, target=target, retained=retained, layers=LAYERS,
+    rep = rspd.api.erase(model, target=target, retained=retained, layers=LAYERS,
                       mu_per_token=1.0, apply=False, spectrum="full")
     spec = rep.specificity[key]["specificity"]
     assert len(spec["spectrum"]) == spec["n"] and spec["spectrum"][:8] == spec["top"]
-    grid = rspd.suggest_mu_per_token(spec, fractions=(0.5,), quantiles=(0.5,))
+    grid = rspd.core.suggest_mu_per_token(spec, fractions=(0.5,), quantiles=(0.5,))
     name = next(n for n, r in rep.matrices.items() if r["input_key"] == key)
-    assert grid == rspd.suggest_mu_per_token(rep.spectrum(name), fractions=(0.5,),
+    assert grid == rspd.core.suggest_mu_per_token(rep.spectrum(name), fractions=(0.5,),
                                               quantiles=(0.5,))
     back = json.loads(rep.to_json())["specificity"][key]["specificity"]
-    assert rspd.suggest_mu_per_token(back, fractions=(0.5,), quantiles=(0.5,)) == grid
+    assert rspd.core.suggest_mu_per_token(back, fractions=(0.5,), quantiles=(0.5,)) == grid
     rep.close()
     with pytest.raises(ValueError, match="readout"):
-        rspd.erase(model, target=target, retained=retained, mu_per_token=1.0,
+        rspd.api.erase(model, target=target, retained=retained, mu_per_token=1.0,
                     solver="grams", spectrum="full")
     with pytest.raises(ValueError, match="spectrum must be"):
-        rspd.erase(model, target=target, retained=retained, mu_per_token=1.0,
+        rspd.api.erase(model, target=target, retained=retained, mu_per_token=1.0,
                     spectrum="all")
 
 
@@ -126,7 +126,7 @@ def test_cli_no_apply_solves_every_dose(capsys, tmp_path):
 def test_descriptive_energy_names_alias_the_deprecated_keys():
     model = tm.gpt2()
     target, retained = _sets()
-    rep = rspd.erase(model, target=target, retained=retained, layers=LAYERS,
+    rep = rspd.api.erase(model, target=target, retained=retained, layers=LAYERS,
                       mu_per_token=1.0, rank_rule=0.1, apply_rank_rule=None)
     for rows in (rep.matrices, *[rep._session.state.lam_info[0]]):
         for r in rows.values():
@@ -137,9 +137,9 @@ def test_descriptive_energy_names_alias_the_deprecated_keys():
     W = torch.randn(5, 4, dtype=torch.float64)
     X, Y = torch.randn(12, 4, dtype=torch.float64), torch.randn(30, 4, dtype=torch.float64)
     G_X, G_Y = X.T @ X, Y.T @ Y
-    comp = rspd.erased_component(W, X, Y, mu=1.0)
-    for lk in (rspd.leaks(W, comp, X, Y), rspd.leaks_gram(W, comp, X, G_Y),
-               rspd.leaks_grams(W, rspd.erased_component_grams(W, G_X, G_Y, mu=1.0),
+    comp = rspd.core.erased_component(W, X, Y, mu=1.0)
+    for lk in (rspd.core.leaks(W, comp, X, Y), rspd.core.leaks_gram(W, comp, X, G_Y),
+               rspd.core.leaks_grams(W, rspd.core.erased_component_grams(W, G_X, G_Y, mu=1.0),
                                  G_X, G_Y)):
         assert lk["target_surviving_rel"] == lk["erased_rel"]
         assert lk["retained_disturbed_rel"] == lk["retained_rel"]
@@ -156,7 +156,7 @@ def test_export_checkpoint_is_re_exported():
 def test_matrices_are_in_block_then_forward_order():
     model = tm.gpt2()
     target, retained = _sets()
-    rep = rspd.erase(model, target=target, retained=retained, mu_per_token=1.0)
+    rep = rspd.api.erase(model, target=target, retained=retained, mu_per_token=1.0)
     names = list(rep.matrices)
     order = ["attn.c_attn", "attn.c_proj", "mlp.c_fc", "mlp.c_proj"]
     assert names == [f"L{b:02d}.{t}" for b in range(3) for t in order]
@@ -170,7 +170,7 @@ def test_non_pd_solves_give_one_summary_warning():
     model = tm.gpt2()                    # LayerNorm-fed c_attn / c_fc: G_mu rank-deficient
     target, retained = _sets()
     events = []
-    rep = rspd.erase(model, target=target, retained=retained, mu_per_token=[0.3, 1.0],
+    rep = rspd.api.erase(model, target=target, retained=retained, mu_per_token=[0.3, 1.0],
                       apply_mu_per_token=1.0, progress=lambda e, i: events.append((e, i)))
     msgs = [w for w in rep.warnings if NON_PD_MESSAGE in w]
     assert len(msgs) == 1 and len(rep.non_pd) > 1

@@ -4,7 +4,7 @@ erasure are, as dataclasses a recipe can load from YAML.
     from rspd.experiments.data import DataSpec, build_erasure_data
     spec = DataSpec.from_yaml("my_data.yaml")
     data = build_erasure_data(tokenizer, spec)
-    rspd.erase(model, target=data.target_ids, retained=data.retained_ids,
+    rspd.api.erase(model, target=data.target_ids, retained=data.retained_ids,
                 mu_per_token=[0.01])
 
 YAML shape (every key but ``target`` / ``retained`` optional)::

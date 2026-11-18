@@ -49,7 +49,7 @@ def ref(tmp_path_factory):
     d.mkdir()
     (d / "__init__.py").write_text("")
     for k, text in src.items():
-        # the reference imports its effective rank as `rspd.erank`; point it at the export
+        # the reference imports its effective rank as ``rspd.erank``; point it at the export
         (d / f"{k}.py").write_text(text.replace("from rspd.erank import",
                                                 f"from {PKG}.erank import"))
     pkg = types.ModuleType(PKG)
@@ -113,23 +113,23 @@ def test_erased_component_forms(ref, case, mu):
     (W, X, Y), ridge = _split(case)
     G_X, G_Y = X.T @ X, Y.T @ Y
     for rank in (None, 2):
-        a = rspd.erased_component(W, X, Y, mu=mu, rank=rank, ridge_rel=ridge)
+        a = rspd.core.erased_component(W, X, Y, mu=mu, rank=rank, ridge_rel=ridge)
         b = ref.erased_component(W, X, Y, mu=mu, rank=rank, ridge_rel=ridge)
         assert _rel(a.dense(), b.dense()) <= TOL
         _same_info(a.info, b.info, ("solver", "rank", "k", "truncated", "formula", "mu",
                                     "ridge_delta"))
     for lam_rel in (None, 0.05):
-        a = rspd.erased_component_gram(W, X, G_Y, mu=mu, lam_rel=lam_rel, ridge_rel=ridge)
+        a = rspd.core.erased_component_gram(W, X, G_Y, mu=mu, lam_rel=lam_rel, ridge_rel=ridge)
         b = ref.erased_component_gram(W, X, G_Y, mu=mu, lam_rel=lam_rel, ridge_rel=ridge)
         assert _rel(a.A @ a.B, b.A @ b.B) <= TOL
         assert _rel(a.info["sigma"], b.info["sigma"]) <= TOL
         assert a.info["fit"] == pytest.approx(b.info["fit"], rel=TOL, abs=1e-300)
         _same_info(a.info, b.info, ("solver", "rank", "k", "ridge_delta"))
-    a = rspd.erased_component_grams(W, G_X, G_Y, mu=mu, ridge_rel=ridge)
+    a = rspd.core.erased_component_grams(W, G_X, G_Y, mu=mu, ridge_rel=ridge)
     b = ref.erased_component_grams(W, G_X, G_Y, mu=mu, ridge_rel=ridge)
     assert _rel(a.A, b.A) <= TOL and torch.equal(a.B, b.B)
     _same_info(a.info, b.info, ("solver", "ridge_delta", "rank", "B_is_identity", "formula"))
-    Sa, ia = rspd.readout_gram(G_Y, X, mu, ridge_rel=ridge)
+    Sa, ia = rspd.core.readout_gram(G_Y, X, mu, ridge_rel=ridge)
     Sb, ib = ref.readout_gram(G_Y, X, mu, ridge_rel=ridge)
     assert _rel(Sa, Sb) <= TOL and ia == ib
 
@@ -140,9 +140,9 @@ def test_truncate_component(ref, case, svd_dtype):
     (W, X, Y), ridge = _split(case)
     G_Y = Y.T @ Y
     specs = ["erank", 0.0, 1e-3, 0.1, 0.5]
-    fa = rspd.erased_component_gram(W, X, G_Y, mu=2.0, ridge_rel=ridge, spectrum=False)
+    fa = rspd.core.erased_component_gram(W, X, G_Y, mu=2.0, ridge_rel=ridge, spectrum=False)
     fb = ref.erased_component_gram(W, X, G_Y, mu=2.0, ridge_rel=ridge, spectrum=False)
-    ca = rspd.truncate_component(fa, X, specs, svd_dtype=svd_dtype)
+    ca = rspd.core.truncate_component(fa, X, specs, svd_dtype=svd_dtype)
     cb = ref.truncate_component(fb, X, specs, svd_dtype=svd_dtype)
     for a, b in zip(ca, cb):
         assert _rel(a.dense(), b.dense()) <= TOL
@@ -152,7 +152,7 @@ def test_truncate_component(ref, case, svd_dtype):
 
 
 #: package-only leak keys -> the reference key holding the same value.
-NEW_NAMES = {new: old for old, new in rspd.solve.ENERGY_ALIASES.items()}
+NEW_NAMES = {new: old for old, new in rspd.core.solve.ENERGY_ALIASES.items()}
 
 
 @pytest.mark.parametrize("case", CASES, ids=IDS)
@@ -160,18 +160,18 @@ def test_leaks(ref, case):
     (W, X, Y), ridge = _split(case)
     G_X, G_Y = X.T @ X, Y.T @ Y
     for rank in (None, 3):
-        a = rspd.erased_component(W, X, Y, mu=1.0, rank=rank, ridge_rel=ridge)
+        a = rspd.core.erased_component(W, X, Y, mu=1.0, rank=rank, ridge_rel=ridge)
         b = ref.erased_component(W, X, Y, mu=1.0, rank=rank, ridge_rel=ridge)
-        for fa, fb, args in ((rspd.leaks_gram, ref.leaks_gram, (X, G_Y)),
-                             (rspd.leaks, ref.leaks, (X, Y))):
+        for fa, fb, args in ((rspd.core.leaks_gram, ref.leaks_gram, (X, G_Y)),
+                             (rspd.core.leaks, ref.leaks, (X, Y))):
             la, lb = fa(W, a, *args), fb(W, b, *args)
             # the package adds descriptive names of two reference keys (same values)
             assert set(la) - set(NEW_NAMES) == set(lb)
             for k in la:
                 assert la[k] == pytest.approx(lb[NEW_NAMES.get(k, k)], rel=TOL, abs=1e-300), k
-    a = rspd.erased_component_grams(W, G_X, G_Y, mu=1.0, ridge_rel=ridge)
+    a = rspd.core.erased_component_grams(W, G_X, G_Y, mu=1.0, ridge_rel=ridge)
     b = ref.erased_component_grams(W, G_X, G_Y, mu=1.0, ridge_rel=ridge)
-    la, lb = rspd.leaks_grams(W, a, G_X, G_Y), ref.leaks_grams(W, b, G_X, G_Y)
+    la, lb = rspd.core.leaks_grams(W, a, G_X, G_Y), ref.leaks_grams(W, b, G_X, G_Y)
     for k in la:
         assert la[k] == pytest.approx(lb[NEW_NAMES.get(k, k)], rel=TOL, abs=1e-300), k
 
@@ -179,7 +179,7 @@ def test_leaks(ref, case):
 @pytest.mark.parametrize("case", CASES, ids=IDS)
 def test_specificity(ref, case):
     (W, X, Y), ridge = _split(case)
-    a = rspd.specificity(Y.T @ Y, X, Y.shape[0], k=4, ridge_rel=ridge, full=True)
+    a = rspd.core.specificity(Y.T @ Y, X, Y.shape[0], k=4, ridge_rel=ridge, full=True)
     b = ref.specificity_gram(Y.T @ Y, X, Y.shape[0], k=4, ridge_rel=ridge)
     assert a["solver"] == b["solver"] and a["n"] == b["n"] and a["n_above"] == b["n_above"]
     assert a["top"] == pytest.approx(b["top"], rel=TOL, abs=1e-300)

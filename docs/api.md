@@ -1,6 +1,6 @@
 # API reference
 
-Every public symbol of `rspd` (`rspd.__all__`, `rspd.models.__all__`,
+Every public symbol of `rspd` (`rspd.__all__`, `rspd.core.__all__`, `rspd.models.__all__`,
 `rspd.capture.__all__`), the `rspd` and `rspd-exp` command lines, and the package-level
 API of `rspd[experiments]`. Hand-written; `tests/test_docs_core.py` and
 `tests/experiments/test_docs_experiments.py` fail when a public symbol, a
@@ -8,17 +8,26 @@ subcommand or an option is missing here. Conventions throughout: `X` target, `Y`
 batch-first `[n, d_in]`; `W [d_out, d_in]`; the edit is `W − M`; the dose is `mu_per_token`.
 Math: `docs/math.md`. Workflow: `AGENTS.md`.
 
-## `rspd` — model-level
+## `rspd` — the public interface
+
+| symbol | semantics |
+| --- | --- |
+| `SRSPD(model, tokenizer=None, *, layers=None, solver="readout", device=None, gram_budget_gib=None, scratch_dir=None, subtract_bias=False, progress=None)` | The supervised variant, attached to a loaded Hugging Face model. `inspect() -> dict` says what would be decomposed. `fit(target, retained, mu_per_token, *, rank_rule=None, ridge_rel=0.0, spectrum="top", **solve_options) -> Components` solves every selected matrix at every dose (and rank rule) without changing the model. |
+| `Components` | What a fit returns: the ordered `Component`s. `components[name]` / `components[i]`, iteration, `names`, `len`. `settings` lists the solved settings (for SRSPD, `(mu_per_token, rank_rule)` pairs) and `setting` the current one; `at(setting)` reads another. `leaks` is `{matrix: {L_X_rel, L_Y_rel}}`. `apply(setting=<current>)` subtracts the components from the model (`W ← W − A B`; a bare `mu_per_token` selects that dose); `restore()` puts the weights back bit for bit; `close()` restores and frees the fit. `apply_to({name: W}) -> dict` does the subtraction on tensors. `report` is the fit's full record (`EditReport`). `Components.from_components(list)` builds one from tensors. |
+| `Component` | One low-rank piece `M = A B` of one weight matrix: fields `A [d_out, r]`, `B [r, d_in]`, `info`; `dense()`, `name`, `rank`, `leaks`. The type every `rspd.core` solve returns (`ErasedComponent` is the same class). |
+| `inspect_model(model_or_id, layers=None, *, subtract_bias=False, gram_budget_gib=None, trust_remote_code=False) -> dict` | What a fit would edit: selector, matrices (shape, dtype, input key), input keys with Gram bytes per solver, totals, quirks, warnings; `pass_plan` with a budget. A hub id / local dir is built on the `meta` device (no weights). |
+| `export_checkpoint(model, tokenizer, out_dir, *, source=None, token=None) -> dict` | Re-export of `rspd.models.export.export_checkpoint` (below). |
+
+## `rspd.api` — the function the class wraps
 
 | symbol | semantics |
 | --- | --- |
 | `erase(model, tokenizer=None, *, target, retained, mu_per_token, apply=True, apply_mu_per_token=None, apply_rank_rule=<unset>, layers=None, solver="readout", rank_rule=None, ridge_rel=0.0, device=None, gram_budget_gib=None, scratch_dir=None, progress=None, subtract_bias=False, resume_from_cache=True, eig_extremes=True, lam_svd_dtype="float32", check_bracketing=True, spectrum="top") -> EditReport` | Harvest `X` from `target` and stream `G_Y` from `retained`, solve `M` for every selected matrix at every dose (and rank rule), apply one setting in place (`W − M`), measure leaks per matrix. `spectrum="full"` (readout only) keeps the whole `γ` spectrum per input key in `report.specificity`. Refuses a model carrying an applied erasure (the error names the holding report). |
 | `restore(model) -> list` | Put every weight `erase` edited on `model` back bit for bit, whichever report applied the edit, and release the model's edit lock; returns the restored names (`[]` if nothing applied). |
-| `inspect_model(model_or_id, layers=None, *, subtract_bias=False, gram_budget_gib=None, trust_remote_code=False) -> dict` | What `erase` would edit: selector, matrices (shape, dtype, input key), input keys with Gram bytes per solver, totals, quirks, warnings; `pass_plan` with a budget. A hub id / local dir is built on the `meta` device (no weights). |
+| `components_of(report) -> Components` | The `Components` of a live `EditReport`. |
 | `EditReport` | Dataclass returned by `erase`; fields in `AGENTS.md` ("Read the report"); `matrices` in block, then forward order; `non_pd` lists every non-PD solve (one summary warning per run). Methods: `apply_dose(mu_per_token, rule=None)` restores then applies a solved setting and returns the report (refuses, naming the holder, while another report's edit is applied: the edit lock belongs to the model); `restore()` (also releases the lock); `close()` restores the model and frees the solve; `spectrum(name) -> list` the full `γ` of an input key or matrix (needs `spectrum="full"`); `to_dict()`; `to_json(path=None, **json_kw) -> str`. |
-| `export_checkpoint(model, tokenizer, out_dir, *, source=None, token=None) -> dict` | Re-export of `rspd.models.export.export_checkpoint` (below). |
 
-## `rspd` — tensors
+## `rspd.core` — tensors
 
 | symbol | semantics |
 | --- | --- |
@@ -178,7 +187,7 @@ within tolerance and every row's `tp` equals the recipe's `tensor_parallel_size`
 | `TargetSpec(corpora, max_rows=None, max_tokens=None, min_len=50, max_length=768, heldout_rows=8, heldout_from=None)` | The target set `X`. |
 | `RetainedSpec(buckets, chunk_tokens=1024, seed=0, add_bos=True, chat_template=None)` | The retained set `Y` (retained-corpus buckets). |
 | `HeldoutSpec(rows=32, max_length=1024, tail=(), min_len=0)` | The shared baseline held-out readout. |
-| `ErasureData(target_ids, retained_ids, heldout_ids, manifest)` | Token ids ready for `rspd.erase`, plus the data manifest. |
+| `ErasureData(target_ids, retained_ids, heldout_ids, manifest)` | Token ids ready for `rspd.api.erase`, plus the data manifest. |
 | `build_erasure_data(tokenizer, spec, *, cache_dir=None, log=print) -> ErasureData` | Build `X`, `Y` and the readouts (downloads and caches corpora). |
 | `spec_path(name) -> str` | Path of a shipped dataset-builder config (`data/specs/<name>.yaml`). |
 | `SPECS_DIR` | Directory of the shipped configs. |
@@ -188,7 +197,7 @@ within tolerance and every row's `tp` equals the recipe's `tensor_parallel_size`
 | symbol | semantics |
 | --- | --- |
 | `METHODS` | `{recipe method name: runner module path}` (`srspd`, `rmu`, `kuda`, `simnpo`, the three authors'-code runners). |
-| `get(method)` | Import a runner module; each has `run(config, ...) -> dict` writing under the data root. `methods.srspd.run(config, *, model=None, tokenizer=None, out_root=None, log_root=None, progress=None)` does one `rspd.erase` for every dose and rule and exports each. |
+| `get(method)` | Import a runner module; each has `run(config, ...) -> dict` writing under the data root. `methods.srspd.run(config, *, model=None, tokenizer=None, out_root=None, log_root=None, progress=None)` does one `rspd.api.erase` for every dose and rule and exports each. |
 
 `rspd.experiments.models`:
 

@@ -48,10 +48,10 @@ class Net(torch.nn.Module):
 m = Net()
 before = {n: p.detach().clone() for n, p in m.named_parameters()}
 g = torch.Generator().manual_seed(0)
-rep = rspd.erase(m, target=[torch.randint(0, 25, (12,), generator=g)],
+rep = rspd.api.erase(m, target=[torch.randint(0, 25, (12,), generator=g)],
                   retained=torch.randint(25, 50, (4, 16), generator=g), mu_per_token=1.0)
 assert len(rep.matrices) == 4 and rep.applied
-rspd.restore(m)
+rspd.api.restore(m)
 assert all(torch.equal(before[n], p) for n, p in m.named_parameters())
 info = rspd.inspect_model(m)
 assert set(info["input_keys"]) == {"L00.mlp_in", "L00.down_in", "L01.mlp_in", "L01.down_in"}

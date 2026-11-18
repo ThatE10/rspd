@@ -2,7 +2,7 @@
 ``data.target.build_erasure_data``) on the tiny local unlearning sets: spec
 validation, fit / held-out row selection, the exact token budget, the retained
 build and its document-disjoint held-out twin, the readout keys, and the ids
-going straight into ``rspd.erase``. CPU, no network."""
+going straight into ``rspd.api.erase``. CPU, no network."""
 from __future__ import annotations
 
 import pytest
@@ -162,9 +162,9 @@ def test_the_ids_go_straight_into_srspd_erase(env):
     data = build_erasure_data(tok, DataSpec.from_dict(_spec()), log=lambda *_: None)
     model = tiny_gpt2()
     before = {n: p.detach().clone() for n, p in model.named_parameters()}
-    rep = rspd.erase(model, target=data.target_ids, retained=data.retained_ids,
+    rep = rspd.api.erase(model, target=data.target_ids, retained=data.retained_ids,
                       mu_per_token=[1.0], layers="gpt2")
     changed = [n for n, p in model.named_parameters() if not torch.equal(p, before[n])]
     assert changed and rep.matrices
-    rspd.restore(model)
+    rspd.api.restore(model)
     assert all(torch.equal(p, before[n]) for n, p in model.named_parameters())

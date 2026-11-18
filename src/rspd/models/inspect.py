@@ -43,13 +43,13 @@ def load_skeleton(model_id: str, *, trust_remote_code: bool = False):
 
 def inspect_model(model_or_id, layers=None, *, subtract_bias=False, gram_budget_gib=None,
                   trust_remote_code=False) -> dict:
-    """Describe what :func:`rspd.erase` would edit on this model.
+    """Describe what :func:`rspd.api.erase` would edit on this model.
 
     Parameters
     ----------
     model_or_id : an ``nn.Module`` (HF model) or a hub id / local path.
     layers : the layer selector (:func:`rspd.models.selector.resolve_selector`).
-    subtract_bias : as in :func:`rspd.erase`.
+    subtract_bias : as in :func:`rspd.api.erase`.
     gram_budget_gib : if given, also plan the Gram passes under this per-device
         budget for both solvers (``pass_plan``).
 

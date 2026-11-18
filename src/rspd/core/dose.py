@@ -3,7 +3,7 @@
 Definitions
 -----------
 ``X`` (target, ``n_x`` rows/tokens) and ``Y`` (retained, ``n_y`` rows/tokens)
-enter the solve (:func:`rspd.erased_component`) as
+enter the solve (:func:`rspd.core.erased_component`) as
 
     min_M  ||W X^T - M X^T||^2 + mu ||M Y^T||^2,
 
@@ -29,7 +29,7 @@ What a dose erases
 ------------------
 Let ``gamma_i`` be the generalised eigenvalues of the per-token target
 covariance ``X^T X / n_x`` against the per-token retained covariance
-``Y^T Y / n_y`` (:func:`rspd.specificity`). In that eigenbasis the full-rank
+``Y^T Y / n_y`` (:func:`rspd.core.specificity`). In that eigenbasis the full-rank
 solve is diagonal and the erased fraction of direction ``i`` is
 
     f_i = gamma_i m / (1 + gamma_i m),
@@ -107,7 +107,7 @@ class Dose:
     @property
     def mu(self) -> float:
         """``1 / mu_raw = n_x / (mu_per_token * n_y)``: the solve's weight on
-        the retained term (the ``mu`` argument of :func:`rspd.erased_component`)."""
+        the retained term (the ``mu`` argument of :func:`rspd.core.erased_component`)."""
         return 1.0 / self.mu_raw
 
     def erased_fraction(self, gamma):
@@ -142,8 +142,8 @@ def _gamma_tensor(gamma):
     if isinstance(gamma, Mapping):
         if "spectrum" not in gamma:
             raise ValueError("suggest_mu_per_token needs the full gamma spectrum: pass "
-                             "rspd.specificity(..., full=True), an entry of "
-                             "rspd.erase(..., spectrum='full').specificity, or the spectrum "
+                             "rspd.core.specificity(..., full=True), an entry of "
+                             "rspd.api.erase(..., spectrum='full').specificity, or the spectrum "
                              "itself")
         gamma = gamma["spectrum"]
     g = torch.as_tensor(gamma, dtype=torch.float64).reshape(-1)
@@ -163,9 +163,9 @@ def suggest_mu_per_token(gamma, fractions: Iterable[float] = (0.1, 0.5, 0.9),
     Parameters
     ----------
     gamma : the generalised-eigenvalue spectrum -- a sequence/tensor of
-        ``gamma >= 0``, or the dict from ``rspd.specificity(..., full=True)``
+        ``gamma >= 0``, or the dict from ``rspd.core.specificity(..., full=True)``
         (also ``report.specificity[key]["specificity"]`` of
-        ``rspd.erase(..., spectrum="full")``).
+        ``rspd.api.erase(..., spectrum="full")``).
     fractions : erased fractions, each in ``(0, 1)``.
     quantiles : quantile levels of ``gamma``, each in ``[0, 1]``
         (``torch.quantile``, linear interpolation, over every value given).

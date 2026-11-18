@@ -1,4 +1,4 @@
-"""``rspd.coala.fit_coala`` -- the COALA projector (Parkina & Rakhuba,
+"""``rspd.core.coala.fit_coala`` -- the COALA projector (Parkina & Rakhuba,
 arXiv:2507.07580, Proposition 1) -- against the same projector computed by an
 independent route, written inline here: for a thin QR ``X^T = Q R``,
 ``W X = (W R^T) Q^T``, so the left singular vectors and singular values of the
@@ -23,7 +23,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from rspd import coala  # noqa: E402
+from rspd.core import coala  # noqa: E402
 
 
 def fit_factors(W, A, T):
@@ -153,7 +153,7 @@ def test_compression_materialises_the_coala_prefix():
 def test_truncation_uses_the_coala_basis_of_M_over_X():
     """The erasure truncation is ``fit_coala`` applied to ``M`` with the
     target as context: ``U_r U_r^T M`` from the SVD of ``M X^T``."""
-    from rspd import erased_component, truncate_component
+    from rspd.core import erased_component, truncate_component
     g = torch.Generator().manual_seed(2)
     W = torch.randn(10, 8, generator=g, dtype=torch.float64)
     X = torch.randn(6, 8, generator=g, dtype=torch.float64)

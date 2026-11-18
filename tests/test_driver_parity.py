@@ -9,7 +9,7 @@ to end on a tiny random Mistral (bf16, mocked corpora, two Gram passes with
 boundary resume) and a tiny GPT-2 (fp32 local checkpoint, local JSONL sets),
 under both solvers. The token ids the driver streamed (its target sequences
 and retained chunks, captured at its Gram-pass entry point) are then handed to
-:func:`rspd.erase` on an identical model at the same ``mu_per_token`` (the
+:func:`rspd.api.erase` on an identical model at the same ``mu_per_token`` (the
 driver is configured with ``mu_per_token`` too, so both sides derive
 ``mu = n_x / (mu_per_token * n_y)`` by the same arithmetic), and the edited
 weights are compared with the driver's exported checkpoint.
@@ -26,7 +26,7 @@ repository or git is absent.
 
 The driver is also run with a LIST of rank rules (``RULES``, readout solver):
 it solves every rule from one set of Gram passes and exports the full-rank
-edit and one truncated edit per rule; one :func:`rspd.erase` call with the
+edit and one truncated edit per rule; one :func:`rspd.api.erase` call with the
 same rule list must reproduce every one of those exports bitwise (through
 ``report.apply_dose(mu_per_token, rule)``), leaks included.
 """
@@ -272,7 +272,7 @@ def test_tiny_mistral_matches_the_reference_driver(ref, tmp_path, monkeypatch, s
     exported = _exported(mdir)
     model = _mistral(torch.bfloat16)
     pristine = {n: p.detach().clone() for n, p in model.named_parameters()}
-    rep = rspd.erase(model, target=seen["target"], retained=seen["retained"],
+    rep = rspd.api.erase(model, target=seen["target"], retained=seen["retained"],
                       mu_per_token=MPT, solver=solver, ridge_rel=1e-10,
                       gram_budget_gib=(20000 if solver == "readout" else 40000) / 2 ** 30)
     assert rep.n_x == seen["n_target"] == metrics["n_X_target_tokens"]
@@ -293,7 +293,7 @@ def test_tiny_gpt2_matches_the_reference_driver(ref, tmp_path, monkeypatch, solv
     exported = _exported(mdir)
     model = transformers.GPT2LMHeadModel.from_pretrained(ckpt).eval()
     pristine = {n: p.detach().clone() for n, p in model.named_parameters()}
-    rep = rspd.erase(model, target=seen["target"], retained=seen["retained"],
+    rep = rspd.api.erase(model, target=seen["target"], retained=seen["retained"],
                       mu_per_token=MPT, solver=solver, ridge_rel=1e-10)
     assert rep.n_x == 60 and rep.selector["preset"] == "gpt2"
     assert rep.dose["mu"] == pytest.approx(metrics["srspd"][dose_key]["mu"], rel=0, abs=0)
@@ -307,7 +307,7 @@ def test_reference_metrics_record_the_same_dose(ref, tmp_path, monkeypatch):
     metrics, seen, _ = _run_mistral(ref, tmp_path, monkeypatch, "readout", MPT)
     (dose_key,) = metrics["srspd"]
     e = metrics["srspd"][dose_key]
-    d = rspd.dose_from_mu_per_token(MPT, metrics["n_X_target_tokens"],
+    d = rspd.core.dose_from_mu_per_token(MPT, metrics["n_X_target_tokens"],
                                      metrics["n_Y_retain_tokens"]).as_dict()
     assert d["mu"] == e["mu"] and json.dumps(d)
 
@@ -333,7 +333,7 @@ def test_tiny_mistral_rank_rule_list_matches_the_reference_driver(ref, tmp_path,
     model = _mistral(torch.bfloat16)
     pristine = {n: p.detach().clone() for n, p in model.named_parameters()}
     passes = []
-    rep = rspd.erase(model, target=seen["target"], retained=seen["retained"],
+    rep = rspd.api.erase(model, target=seen["target"], retained=seen["retained"],
                       mu_per_token=MPT, solver="readout", ridge_rel=1e-10, rank_rule=RULES,
                       apply=False, gram_budget_gib=20000 / 2 ** 30,
                       progress=lambda e, i: passes.append(e) if e == "plan" else None)
@@ -349,7 +349,7 @@ def test_tiny_gpt2_rank_rule_list_matches_the_reference_driver(ref, tmp_path, mo
     assert set(metrics["srspd"][dose_key]["truncated"]) == {"0.01", "erank"}
     model = transformers.GPT2LMHeadModel.from_pretrained(ckpt).eval()
     pristine = {n: p.detach().clone() for n, p in model.named_parameters()}
-    rep = rspd.erase(model, target=seen["target"], retained=seen["retained"],
+    rep = rspd.api.erase(model, target=seen["target"], retained=seen["retained"],
                       mu_per_token=MPT, solver="readout", ridge_rel=1e-10, rank_rule=RULES,
                       apply=False)
     _compare_every_rule(model, mdir, metrics, rep, dose_key, pristine, 12)

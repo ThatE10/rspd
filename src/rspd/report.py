@@ -30,7 +30,7 @@ in-block projection matrices. The relative totals answer different questions:
   tensors whose ``rel`` exceeds ``CHANGED_TOL`` (a localisation statistic: an
   edit of a few matrices touches few, a full-model solve touches them all).
 
-Optionally the **effective rank** (:func:`rspd.erank.effective_rank`) of each
+Optionally the **effective rank** (:func:`rspd.core.erank.effective_rank`) of each
 changed projection's ``dW`` is recorded beside the effective rank of
 ``W_base`` -- cheap at small model size, and off by default so a large model
 does not pay for an SVD per matrix.
@@ -56,7 +56,7 @@ from typing import Any, Mapping
 
 import torch
 
-from .erank import effective_rank
+from .core.erank import effective_rank
 
 #: A tensor whose relative change is at or below this is "unchanged" — it
 #: absorbs bf16 round-trips and save/load noise without hiding a real edit.

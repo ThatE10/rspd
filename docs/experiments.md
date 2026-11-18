@@ -97,7 +97,7 @@ exports present is matched within tolerance and every row's `tp` equals the reci
 from rspd.experiments.data import DataSpec, build_erasure_data
 spec = DataSpec.from_yaml("data.yaml")      # target / retained / held-out; shape in data/spec.py
 data = build_erasure_data(tokenizer, spec)  # downloads the corpora; X, Y as token ids
-rspd.erase(model, target=data.target_ids, retained=data.retained_ids, mu_per_token=[0.01])
+rspd.api.erase(model, target=data.target_ids, retained=data.retained_ids, mu_per_token=[0.01])
 ```
 
 | module | what |
@@ -133,7 +133,7 @@ is pushed to a model hub; tracking is off unless the config enables it.
 
 | runner | what |
 | --- | --- |
-| `srspd` | data spec -> one `rspd.erase` at every `mu_per_token` (both solvers, rank rules) -> one export + held-out readout per (dose, rule) |
+| `srspd` | data spec -> one `rspd.api.erase` at every `mu_per_token` (both solvers, rank rules) -> one export + held-out readout per (dose, rule) |
 | `rmu`, `kuda`, `simnpo` | ports of the baselines (credits below) |
 | `upstream_kuda`, `upstream_kuda_muse`, `upstream_simnpo` | the authors' own code at pinned commits, run verbatim with documented result-neutral shims |
 

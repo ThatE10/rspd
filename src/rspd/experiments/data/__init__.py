@@ -5,7 +5,7 @@ Modules:
 
 * :mod:`.spec` -- :class:`DataSpec` / :class:`TargetSpec` / :class:`RetainedSpec`
   dataclasses, loadable from YAML; :func:`build_erasure_data` (in :mod:`.target`)
-  turns a spec into token ids for :func:`rspd.erase`;
+  turns a spec into token ids for :func:`rspd.api.erase`;
 * :mod:`.corpora` -- the named-corpus registry (WMDP, WikiText, MUSE, Wikipedia,
   config-level ``local_jsonl``) and its loaders, MUSE windows, tokenisation helpers;
 * :mod:`.retained_corpus` -- the hashed, cached retained-corpus builder;

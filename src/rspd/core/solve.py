@@ -10,7 +10,7 @@ Notation (fixed; never swap)
            ``G_Y = Y^T Y`` (``[d_in, d_in]``) is ever formed;
 ``W``      the pristine weight ``[d_out, d_in]``;
 ``mu``     the weight on the retained term of the objective (> 0). Users give
-           the dose as ``mu_per_token`` and convert with :mod:`rspd.dose`;
+           the dose as ``mu_per_token`` and convert with :mod:`rspd.core.dose`;
 ``G_mu``   ``= X^T X + mu Y^T Y``, the weighted batch Gram;
 ``P``      ``= G_mu G_mu^+``, the orthogonal projector onto span(X ∪ Y);
 ``M``      the ERASED COMPONENT
@@ -52,7 +52,7 @@ Rank truncation (R2) -- the COALA projector on M over X
 the erased component's response on the target, ``M X^T`` (Eckart--Young on
 ``M X^T``: ``M_r X^T = [M X^T]_r``). This is the context-aware projector of
 COALA (Parkina & Rakhuba, arXiv:2507.07580, NeurIPS 2025, Proposition 1)
-applied to ``M`` with the target as context; see :mod:`rspd.coala`.
+applied to ``M`` with the target as context; see :mod:`rspd.core.coala`.
 ``range(M) = range(M X^T)``, so at full rank ``M_r = M`` and ``W - M_r`` equals
 the lam = 0 edit ``W - (W X^T) S`` exactly. The hard-threshold rank rule of the
 rank penalty is ``r* = #{j : sigma_j^2 > lam}`` on that spectrum
@@ -94,6 +94,7 @@ from typing import NamedTuple
 import torch
 
 from .coala import coala_basis
+from .types import Component
 
 __all__ = [
     "CORE_TABLE", "TRUNCATION_FORMULA", "ERANK_RULE",
@@ -117,21 +118,15 @@ leaks L_X = M_keep X, L_Y = M Y (measured, never assumed zero); M + M_keep = W P
 (W − M) − M_keep = W (I − P): the original weight's action on every input
 direction the batch does not span, which is NOT zero. Writing the kept map
 throws it away; under rank truncation it also loses retained behaviour inside
-the span. The edit is ALWAYS W_new = W − M (rspd.apply_erasure)."""
+the span. The edit is ALWAYS W_new = W − M (rspd.core.apply_erasure)."""
 
 
-class ErasedComponent(NamedTuple):
-    """The erased component ``M = A @ B`` (or its rank-``r`` truncation
-    ``M_r``), ``A [d_out, r]``, ``B [r, d_in]``. The ONLY thing
-    :func:`apply_erasure` subtracts from a weight. Components of ``M`` (R3):
-    a factor pair, a truncation of ``M``, a sum of components of ``M`` are all
-    ``ErasedComponent``s. ``info`` carries the solve diagnostics."""
-    A: torch.Tensor
-    B: torch.Tensor
-    info: dict
-
-    def dense(self) -> torch.Tensor:
-        return self.A @ self.B
+#: The erased component ``M = A @ B`` (or its rank-``r`` truncation ``M_r``),
+#: ``A [d_out, r]``, ``B [r, d_in]``: the ONLY thing :func:`apply_erasure`
+#: subtracts from a weight. Components of ``M`` (R3) -- a factor pair, a
+#: truncation of ``M``, a sum of components of ``M`` -- are all of this type,
+#: which is the package-wide :class:`~rspd.core.types.Component`.
+ErasedComponent = Component
 
 
 class KeptMap(NamedTuple):
@@ -290,7 +285,7 @@ def readout_gram(G_Y, X, mu, *, rcond=None, ridge_rel=0.0):
         condition number: ``kappa(G) = kappa([X; Y])^2``, decisive in float32).
     X : [n_x, d_in] target activations (batch-first; may have zero rows).
     mu : float > 0, the weight on ``||M Y^T||^2`` in the erased-component
-        objective (from :func:`rspd.dose_from_mu_per_token`).
+        objective (from :func:`rspd.core.dose_from_mu_per_token`).
     rcond : relative eigenvalue floor for the PD test and the eigh fallback
         (default ``max(d_in * eps_float64, 1e-12)``).
     ridge_rel : relative ridge, ``delta = ridge_rel * max(diag(mu Y^T Y))``.
@@ -337,7 +332,7 @@ def erased_component_gram(W, X, G_Y=None, *, mu=None, rank=None, lam=0.0, lam_re
 
     Truncation (R2) is the COALA projector on ``M`` over the target (Parkina &
     Rakhuba, arXiv:2507.07580, NeurIPS 2025, Proposition 1;
-    :func:`rspd.coala.coala_basis`): ``M_r = U_r U_r^T M``, ``U_r`` the leading
+    :func:`rspd.core.coala.coala_basis`): ``M_r = U_r U_r^T M``, ``U_r`` the leading
     left singular vectors of the target response ``M X^T = (W X^T)(S X^T)`` (a
     ``d_out x n_x`` SVD, cheap). ``r`` is ``rank`` when given, else
     ``#{j : sigma_j^2 > lam}`` with ``lam = lam_rel * sigma_1^2`` when
@@ -352,7 +347,7 @@ def erased_component_gram(W, X, G_Y=None, *, mu=None, rank=None, lam=0.0, lam_re
     W : [d_out, d_in] pristine weight.
     X : [n_x, d_in] target activations, batch-first.
     G_Y : [d_in, d_in] retained Gram ``Y^T Y``; may be ``None`` when ``S`` is given.
-    mu : float > 0, the retained weight (from :func:`rspd.dose_from_mu_per_token`).
+    mu : float > 0, the retained weight (from :func:`rspd.core.dose_from_mu_per_token`).
     rank, lam, lam_rel : the truncation request (at most one is meaningful;
         ``rank`` wins, then ``lam_rel``, then ``lam``).
     ridge_rel, rcond : see :func:`readout_gram`.
@@ -424,7 +419,7 @@ def erank_truncation_rank(sigma) -> int:
     """The effective-rank rule's kept rank ``r = max(1, round(erank(sigma)))``,
     capped at ``k = len(sigma)`` (``erank <= k`` already; the cap is a guard);
     ``0`` for an empty or all-zero spectrum (nothing to keep). ``erank`` is
-    :func:`rspd.erank.effective_rank_from_singular_values`."""
+    :func:`rspd.core.erank.effective_rank_from_singular_values`."""
     k = int(sigma.numel())
     if k == 0 or float(sigma.max()) <= 0.0:
         return 0
@@ -436,7 +431,7 @@ def truncate_component(comp_full, X, specs, *, svd_dtype=torch.float32) -> list:
     """Several rank truncations of ONE full-rank erased component from ONE
     spectrum (R2), by the COALA projector on ``M`` over the target (Parkina &
     Rakhuba, arXiv:2507.07580, NeurIPS 2025, Proposition 1;
-    :func:`rspd.coala.coala_basis`).
+    :func:`rspd.core.coala.coala_basis`).
 
     Parameters
     ----------
@@ -627,7 +622,7 @@ def apply_erasure(W, component) -> torch.Tensor:
             "apply_erasure was handed a KeptMap. The kept map is never written into a "
             "model: it is zero off the batch span and, truncated, loses retained "
             "behaviour inside it. Subtract the erased component instead "
-            "(rspd.erased_component -> rspd.apply_erasure).\n\n" + CORE_TABLE)
+            "(rspd.core.erased_component -> rspd.core.apply_erasure).\n\n" + CORE_TABLE)
     if not isinstance(component, ErasedComponent):
         raise ErasureConventionError(
             f"apply_erasure takes an ErasedComponent (A, B) with M = A @ B the erased "
@@ -949,7 +944,7 @@ def specificity(G_Y, X, n_y, k=8, *, ridge_rel=0.0, full=False):
     diagonal -- the kept map ``W - M = W mu Y^T Y G_mu^{-1}`` scales
     generalized eigendirection ``i`` by ``1 / (1 + gamma_i m)`` with
     ``m = mu_per_token = n_x / (mu n_y)``, so the erased fraction of that
-    direction is ``gamma_i m / (1 + gamma_i m)`` (:mod:`rspd.dose`). So
+    direction is ``gamma_i m / (1 + gamma_i m)`` (:mod:`rspd.core.dose`). So
     ``gamma`` says, before any edit is made, which directions a given dose
     erases: a direction with ``gamma`` = 100 is 100x more target than retained
     per token and is half-erased already at ``m = 0.01``; one with

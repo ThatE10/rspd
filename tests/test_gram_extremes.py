@@ -1,12 +1,12 @@
-"""``rspd.solve.gram_eig_extremes`` (the Gram conditioning check) and the CPU
-fallback of the dense ``eigh`` in ``rspd.solve``."""
+"""``rspd.core.solve.gram_eig_extremes`` (the Gram conditioning check) and the CPU
+fallback of the dense ``eigh`` in ``rspd.core.solve``."""
 import pytest
 
 torch = pytest.importorskip("torch")
 
 
 def test_gram_eig_extremes_matches_eigvalsh():
-    from rspd.solve import gram_eig_extremes
+    from rspd.core.solve import gram_eig_extremes
     g = torch.Generator().manual_seed(3)
     A = torch.randn(400, 40, dtype=torch.float64, generator=g)
     A[:, :5] *= 30.0                      # a spread spectrum, kappa ~1e3-1e4
@@ -22,7 +22,7 @@ def test_gram_eig_extremes_matches_eigvalsh():
 
 
 def test_gram_eig_extremes_not_pd_reports_zero():
-    from rspd.solve import gram_eig_extremes
+    from rspd.core.solve import gram_eig_extremes
     g = torch.Generator().manual_seed(4)
     A = torch.randn(10, 30, dtype=torch.float64, generator=g)   # rank 10 < 30
     lo, hi, info = gram_eig_extremes(A.T @ A)
@@ -31,7 +31,7 @@ def test_gram_eig_extremes_not_pd_reports_zero():
 
 def test_eigh_oom_safe_falls_back_to_cpu(monkeypatch):
     """A CUDA OOM in the dense fallback eigh is retried on the CPU."""
-    import rspd.solve as solve
+    import rspd.core.solve as solve
     real = torch.linalg.eigh
     calls = {"n": 0}
 

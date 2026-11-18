@@ -37,10 +37,10 @@ the CLI) needs `transformers` and `safetensors` (the `[hf]` extra).
    Every formula is asymmetric: `M` reproduces `W` on `X` and is penalised on `Y`. Swapped
    sets erase what you meant to keep, and nothing fails loudly. In the API: `target=` is `X`,
    `retained=` is `Y`, and `L_X` / `L_Y` are their leaks.
-2. **The edit is always `W_new = W − M`, through `rspd.apply_erasure`.** Never write a
+2. **The edit is always `W_new = W − M`, through `rspd.core.apply_erasure`.** Never write a
    fitted map or the "kept map" (`W − M` restricted to the batch) into a model. Both edits
    agree on the activations you collected, but off the span of `X ∪ Y` the subtraction keeps
-   `W`'s action and the kept map zeroes it (`rspd.CORE_TABLE`). `apply_erasure` raises
+   `W`'s action and the kept map zeroes it (`rspd.core.CORE_TABLE`). `apply_erasure` raises
    `ErasureConventionError` for anything that is not an `ErasedComponent`.
 3. **Rank truncation acts on `M`, never on `W` or the kept map.** `M_r = U_r U_rᵀ M` with
    `U_r` the leading left singular vectors of `M Xᵀ` (the COALA projector of `M` over the
@@ -106,7 +106,7 @@ model = transformers.AutoModelForCausalLM.from_pretrained("gpt2", dtype=torch.fl
 tokenizer = transformers.AutoTokenizer.from_pretrained("gpt2")
 target = ["one document of the behaviour to erase", "another one"]        # text needs tokenizer
 retained = ["one document of the behaviour to keep", "another one"]
-report = rspd.erase(model, tokenizer, target=target, retained=retained, mu_per_token=1.0)
+report = rspd.api.erase(model, tokenizer, target=target, retained=retained, mu_per_token=1.0)
 ```
 
 Load in float32 when you can: on a bf16 model the edit is formed in fp32 and cast once, and a
@@ -163,7 +163,7 @@ Use the specificity spectrum `γ`:
 * `report.specificity[key]["specificity"]` (readout solver) gives, per input key, the top
   eight `γ`, the median and how many exceed 1, 10 and 100. If few `γ` exceed 1 at a layer,
   the target is not separable there at any moderate dose.
-* `rspd.suggest_mu_per_token(spectrum, fractions, quantiles)` returns the dose that erases
+* `rspd.core.suggest_mu_per_token(spectrum, fractions, quantiles)` returns the dose that erases
   the `q`-quantile direction by fraction `f`, for every `(q, f)`, plus a sorted grid. It
   needs the **full** spectrum: pass `spectrum="full"` to `erase` (readout solver) and hand
   it `report.specificity[key]["specificity"]` or `report.spectrum(key_or_matrix)`. A
@@ -171,9 +171,9 @@ Use the specificity spectrum `γ`:
   the dose:
 
 ```python runnable
-probe = rspd.erase(model, target=target, retained=retained, layers=layers,
+probe = rspd.api.erase(model, target=target, retained=retained, layers=layers,
                     mu_per_token=1.0, apply=False, spectrum="full")
-grid = rspd.suggest_mu_per_token(probe.spectrum("L01.mlp.c_fc"),
+grid = rspd.core.suggest_mu_per_token(probe.spectrum("L01.mlp.c_fc"),
                                   fractions=(0.5, 0.9), quantiles=(0.5, 0.9))
 print(grid["mu_per_token"])                             # pass this grid to erase
 # grid["rows"]: one {"quantile", "gamma", "fraction", "mu_per_token"} per (q, f),
@@ -202,8 +202,8 @@ seqs = lambda s: [torch.as_tensor(t).reshape(1, -1) for t in s]
 acts_x, n_x = harvest_inputs_concat(h, seqs(target))    # {name: [n_x, d_in]} on CPU
 acts_y, n_y = harvest_inputs_concat(h, seqs(retained))
 Yd = acts_y[name].double()
-spec = rspd.specificity(Yd.T @ Yd, acts_x[name], n_y, full=True)   # G_Y, X, n_y
-grid = rspd.suggest_mu_per_token(spec, fractions=(0.5, 0.9), quantiles=(0.5, 0.9))
+spec = rspd.core.specificity(Yd.T @ Yd, acts_x[name], n_y, full=True)   # G_Y, X, n_y
+grid = rspd.core.suggest_mu_per_token(spec, fractions=(0.5, 0.9), quantiles=(0.5, 0.9))
 print(spec["top"][:3], grid["mu_per_token"])            # pass grid["mu_per_token"] to erase
 ```
 
@@ -214,7 +214,7 @@ by your own evaluation) is the normal workflow.
 ### 4. Erase
 
 ```python runnable
-report = rspd.erase(model, target=target, retained=retained, layers=layers,
+report = rspd.api.erase(model, target=target, retained=retained, layers=layers,
                      mu_per_token=[0.3, 1.0, 3.0], apply_mu_per_token=1.0)
 print(report.applied, report.dose["mu_per_token"], report.dose["mu"], report.n_x, report.n_y)
 ```
@@ -230,14 +230,14 @@ always solved too. With more than one rule, `apply_rank_rule=` names the applied
 
 ```python runnable
 report.close()                                  # restores the model; see step 6
-report = rspd.erase(model, target=target, retained=retained, layers=layers,
+report = rspd.api.erase(model, target=target, retained=retained, layers=layers,
                      mu_per_token=1.0, rank_rule=[0.1, "erank"], apply_rank_rule="erank")
 row = report.matrices["L01.mlp.c_fc"]
 print(report.rank_rule, row["rank"], row["rank_bound"], row["erank"])
 report.apply_dose(1.0, None)                    # the full-rank edit W − M of the same solve
 report.apply_dose(1.0, 0.1)                     # W − M_r under lam_rel = 0.1
 report.close()
-report = rspd.erase(model, target=target, retained=retained, layers=layers,
+report = rspd.api.erase(model, target=target, retained=retained, layers=layers,
                      mu_per_token=[0.3, 1.0, 3.0], apply_mu_per_token=1.0)
 ```
 
@@ -340,11 +340,11 @@ edit, not a measurement of the edited model's behaviour: evaluate the edited mod
 ### 6. Re-dose, restore, export
 
 ```python runnable
-rspd.restore(model)                   # back to the original weights
+rspd.api.restore(model)                   # back to the original weights
 pristine = {k: v.clone() for k, v in model.state_dict().items()}   # optional: to verify restore
 report.apply_dose(3.0)                 # restores the pristine weights, applies dose 3.0
 assert report.dose["mu_per_token"] == 3.0
-names = rspd.restore(model)           # bit for bit; returns the restored matrix names
+names = rspd.api.restore(model)           # bit for bit; returns the restored matrix names
 assert names and not report.applied
 assert all(torch.equal(v, pristine[k]) for k, v in model.state_dict().items())   # the check
 report.apply_dose(1.0)                 # any solved (dose, rule) again, no new pass over the data
@@ -370,12 +370,12 @@ On raw tensors (batch-first `X [n_x, d_in]`, `Y [n_y, d_in]`, `W [d_out, d_in]`)
 ```python runnable
 W = torch.randn(8, 6, dtype=torch.float64)
 X, Y = torch.randn(40, 6, dtype=torch.float64), torch.randn(200, 6, dtype=torch.float64)
-dose = rspd.dose_from_mu_per_token(1.0, n_x=X.shape[0], n_y=Y.shape[0])
-comp = rspd.erased_component(W, X, Y, mu=dose.mu)        # M = A @ B, an ErasedComponent
-W_new = rspd.apply_erasure(W, comp)                       # W − M
-lk = rspd.leaks(W, comp, X, Y)
+dose = rspd.core.dose_from_mu_per_token(1.0, n_x=X.shape[0], n_y=Y.shape[0])
+comp = rspd.core.erased_component(W, X, Y, mu=dose.mu)        # M = A @ B, an ErasedComponent
+W_new = rspd.core.apply_erasure(W, comp)                       # W − M
+lk = rspd.core.leaks(W, comp, X, Y)
 print(lk["L_X_rel"], lk["L_Y_rel"], dose.as_dict()["mu_raw"])
-M_r = rspd.erased_component(W, X, Y, mu=dose.mu, rank=2)  # COALA truncation of M over X
+M_r = rspd.core.erased_component(W, X, Y, mu=dose.mu, rank=2)  # COALA truncation of M over X
 ```
 
 `dose.mu` is the only place `mu` is used, and only by these low-level solves. For a Gram of
@@ -387,8 +387,8 @@ M_r = rspd.erased_component(W, X, Y, mu=dose.mu, rank=2)  # COALA truncation of 
 | situation | what happens | what to do |
 | --- | --- | --- |
 | something other than an `ErasedComponent` handed to `apply_erasure` / `leaks` / `truncate_component` (a `KeptMap`, a tensor, factors of `W`) | `ErasureConventionError` (a `TypeError`) with the core table | compute `M` with `erased_component*` and subtract it |
-| `erase` on a model that carries an applied erasure | `RuntimeError: this model carries an applied erasure held by EditReport #N (...): call rspd.restore(model) (or that report's close()) first ...` | `rspd.restore(model)` or the holder's `close()`, then erase |
-| `apply_dose` on one report while another report's edit is applied | `RuntimeError: this model carries an applied erasure held by EditReport #N (...), not by this report (EditReport #M ...) ...` | `rspd.restore(model)`, then `apply_dose` |
+| `erase` on a model that carries an applied erasure | `RuntimeError: this model carries an applied erasure held by EditReport #N (...): call rspd.api.restore(model) (or that report's close()) first ...` | `rspd.api.restore(model)` or the holder's `close()`, then erase |
+| `apply_dose` on one report while another report's edit is applied | `RuntimeError: this model carries an applied erasure held by EditReport #N (...), not by this report (EditReport #M ...) ...` | `rspd.api.restore(model)`, then `apply_dose` |
 | several doses with `apply=True` and no choice | `ValueError: 2 doses solved; pass apply_mu_per_token=<one of [...]> or apply=False ...` (CLI: `pass --apply-mu-per-token <one of [...]> or --no-apply`) | pass `apply_mu_per_token=` or `apply=False` |
 | several rank rules with `apply=True` and no choice | `ValueError: 2 rank rules solved; pass apply_rank_rule=<one of [...], or None for the full-rank edit> ...` | pass `apply_rank_rule=` (`None` = full rank) |
 | `apply_dose` with an unsolved setting | `ValueError: mu_per_token 3.0 was not solved; solved: [...]` | use a value from `report.settings` |
@@ -403,27 +403,27 @@ M_r = rspd.erased_component(W, X, Y, mu=dose.mu, rank=2)  # COALA truncation of 
 | selector matches nothing / a non-linear module | `ValueError: no target projections discovered ...` / `TypeError: ... not nn.Linear/Conv1D` | fix `layers=` against `model.named_modules()` |
 | hooks do not bracket `x Wᵀ` | `AssertionError: bracketing probe violated ...` | model must be in `eval()`; the selector must end at the projection |
 | resumed pass not bitwise equal to a full forward | `ResumeGuardError` | `resume_from_cache=False` |
-| `apply_dose` / `restore` on a closed or JSON-loaded report | `RuntimeError: this EditReport has no live solve attached ...` | re-run `rspd.erase` |
+| `apply_dose` / `restore` on a closed or JSON-loaded report | `RuntimeError: this EditReport has no live solve attached ...` | re-run `rspd.api.erase` |
 
 The edit lock belongs to the **model**: at most one report's edit is applied at a time.
 While one is, every other report's `apply_dose` and every new `erase` on that model refuse
-and name the holder; `rspd.restore(model)` restores the holder's edit bit for bit
+and name the holder; `rspd.api.restore(model)` restores the holder's edit bit for bit
 (whichever report applied it) and releases the lock, after which any open report may
 `apply_dose` again. `close()` reports you no longer need: each keeps its solve in memory.
 
 ```python runnable
 try:
-    rspd.erase(model, target=target, retained=retained, mu_per_token=[0.3, 1.0])
+    rspd.api.erase(model, target=target, retained=retained, mu_per_token=[0.3, 1.0])
 except ValueError as e:
     print(e)                                      # 2 doses solved; pass apply_mu_per_token=...
-r = rspd.erase(model, target=target, retained=retained, layers=layers, mu_per_token=1.0)
+r = rspd.api.erase(model, target=target, retained=retained, layers=layers, mu_per_token=1.0)
 try:
-    rspd.erase(model, target=target, retained=retained, mu_per_token=1.0)
+    rspd.api.erase(model, target=target, retained=retained, mu_per_token=1.0)
 except RuntimeError as e:
     print(e)                                      # ... applied erasure held by EditReport #N ...
 try:
-    rspd.apply_erasure(W, W_new)                 # a bare tensor is not an ErasedComponent
-except rspd.ErasureConventionError as e:
+    rspd.core.apply_erasure(W, W_new)                 # a bare tensor is not an ErasedComponent
+except rspd.core.ErasureConventionError as e:
     print(str(e).splitlines()[0])
 r.close()
 ```

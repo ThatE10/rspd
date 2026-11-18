@@ -84,7 +84,7 @@ def test_erase_both_solvers_leaks_and_restore(family):
     tgt, ret = tm.token_sets()
     reports = {}
     for solver in ("readout", "grams"):
-        rep = rspd.erase(m, target=tgt, retained=ret, mu_per_token=1.0, solver=solver,
+        rep = rspd.api.erase(m, target=tgt, retained=ret, mu_per_token=1.0, solver=solver,
                           ridge_rel=1e-10)
         names = {n for ms in _expected_keys(family).values() for n in ms}
         assert set(rep.matrices) == names                 # leaks for EVERY edited matrix
@@ -99,7 +99,7 @@ def test_erase_both_solvers_leaks_and_restore(family):
         d = json.loads(rep.to_json())
         assert d["solver"] == solver and set(d["matrices"]) == names
         assert not _same(m, before)
-        assert sorted(rspd.restore(m)) == sorted(names)
+        assert sorted(rspd.api.restore(m)) == sorted(names)
         assert _same(m, before)                           # bit for bit
         reports[solver] = rep
     for n, r in reports["readout"].matrices.items():
@@ -130,7 +130,7 @@ def test_gemma4_export_backfills_kv_shared_tensors(tmp_path, family):
     save_file(dead, str(src / "model-extra.safetensors"), metadata={"format": "pt"})
 
     tgt, ret = tm.token_sets()
-    rep = rspd.erase(m, target=tgt, retained=ret, mu_per_token=1.0)
+    rep = rspd.api.erase(m, target=tgt, retained=ret, mu_per_token=1.0)
     assert "kv_shared_layers" in rep.quirks
     info = export_checkpoint(m, None, tmp_path / "out", source=str(src))
     assert sorted(info["kv_shared_backfilled"]) == sorted(dead)
@@ -144,7 +144,7 @@ def test_gemma4_export_backfills_kv_shared_tensors(tmp_path, family):
         w.update(load_file(str(p)))
     q = f"{prefix}.0.self_attn.q_proj.weight"
     assert torch.equal(w[q], dict(m.named_parameters())[q].detach())
-    rspd.restore(m)
+    rspd.api.restore(m)
     # without a source the quirk is reported as a warning, not silently dropped
     info2 = export_checkpoint(m, None, tmp_path / "out2")
     assert info2["kv_shared_backfilled"] == [] and any("KV-shared" in w for w in info2["warnings"])
@@ -154,10 +154,10 @@ def test_bf16_model_reports_survival_and_restores():
     m = tm.mistral(dtype=torch.bfloat16)
     before = _params(m)
     tgt, ret = tm.token_sets()
-    rep = rspd.erase(m, target=tgt, retained=ret, mu_per_token=[0.1, 1.0],
+    rep = rspd.api.erase(m, target=tgt, retained=ret, mu_per_token=[0.1, 1.0],
                       apply_mu_per_token=0.1)
     assert "bf16_edit_in_fp32" in rep.quirks
     assert 0.9 < rep.edit["survival"] < 1.1 and rep.edit["rel_err"] < 0.05
     assert set(rep.by_dose) == {repr(0.1), repr(1.0)}
-    rspd.restore(m)
+    rspd.api.restore(m)
     assert _same(m, before)

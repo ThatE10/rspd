@@ -1,4 +1,4 @@
-"""``rspd.truncate_component`` -- several rank truncations of one erased
+"""``rspd.core.truncate_component`` -- several rank truncations of one erased
 component from ONE spectrum (R2), against ``erased_component_gram(...,
 lam_rel=l)`` taken one ``lam_rel`` at a time.
 
@@ -12,7 +12,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from rspd.solve import (ErasedComponent, ErasureConventionError,  # noqa: E402
+from rspd.core.solve import (ErasedComponent, ErasureConventionError,  # noqa: E402
                         apply_erasure, erased_component_gram, leaks_gram, readout_gram,
                         truncate_component)
 
@@ -214,7 +214,7 @@ def test_erank_rule_refuses_other_names():
 
 
 def test_erank_rank_floor_and_zero_spectrum():
-    from rspd.solve import erank_truncation_rank
+    from rspd.core.solve import erank_truncation_rank
     assert erank_truncation_rank(torch.tensor([1.0, 0.0, 0.0], dtype=F64)) == 1
     assert erank_truncation_rank(torch.tensor([1e-30, 1e-31], dtype=F64)) == 1
     assert erank_truncation_rank(torch.ones(5, dtype=F64)) == 5   # flat -> erank = k
@@ -223,7 +223,7 @@ def test_erank_rank_floor_and_zero_spectrum():
 
 
 def test_shared_formula_with_effective_rank():
-    from rspd.erank import effective_rank, effective_rank_from_singular_values
+    from rspd.core.erank import effective_rank, effective_rank_from_singular_values
     g = torch.Generator().manual_seed(7)
     for shape in [(9, 4), (20, 31), (3, 3)]:
         A = torch.randn(*shape, generator=g)

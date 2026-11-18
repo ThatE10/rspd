@@ -6,7 +6,7 @@ read its input, edit ``W`` as ``[d_out, d_in]``) would get silently wrong.
 Each :class:`Quirk` has a ``detect(model, harness)`` that returns a
 JSON-serialisable detail dict when the quirk applies (``None`` otherwise) and
 names the code that handles it. :func:`detect_quirks` runs every registered
-detector; :func:`rspd.inspect_model` and :func:`rspd.erase` report the result
+detector; :func:`rspd.inspect_model` and :func:`rspd.api.erase` report the result
 under ``"quirks"``.
 
 Registered quirks

@@ -8,9 +8,9 @@ the pristine weight, ``M`` the erased component
     M = argmin_M ||W X^T - M X^T||^2 + mu ||M Y^T||^2 = W X^T X G_mu^+,
     G_mu = X^T X + mu Y^T Y.
 
-The dose is a :class:`rspd.dose.Dose` (``mu_per_token`` plus the set sizes);
+The dose is a :class:`rspd.core.dose.Dose` (``mu_per_token`` plus the set sizes);
 ``Dose.mu`` is what the solves take. Every weight write is ``W_new = W - M``
-through :func:`rspd.apply_erasure`, and the leaks
+through :func:`rspd.core.apply_erasure`, and the leaks
 ``L_X_rel = ||(W - M) X^T|| / ||W X^T||`` and ``L_Y_rel = ||M Y^T|| / ||W Y^T||``
 are measured for every edited matrix.
 
@@ -18,14 +18,14 @@ Two solvers (:data:`SOLVERS`):
 
 ``"readout"``
     The target is held as activations ``X`` per shared input; the per-input
-    readout ``S = X G_mu^+`` (:func:`rspd.readout_gram`) is spilled in fp32 per
+    readout ``S = X G_mu^+`` (:func:`rspd.core.readout_gram`) is spilled in fp32 per
     dose, and ``M = (W X^T) S`` is formed in fp32 at apply time. Supports rank
     truncation of ``M`` (``rank_rule``: COALA projector on ``M`` over ``X``).
 ``"grams"``
     For a target too large to hold: the target sequences are streamed through
     the same Gram passes, so per input only ``G_X = X^T X`` and ``G_Y`` exist,
     ``M = W G_X (G_X + mu G_Y + delta I)^+`` is solved per matrix
-    (:func:`rspd.erased_component_grams`) and spilled dense in fp32 per
+    (:func:`rspd.core.erased_component_grams`) and spilled dense in fp32 per
     (dose, matrix). No rank truncation (it needs ``M X^T``).
 
 The Gram passes are planned under a per-device byte budget
@@ -49,7 +49,7 @@ from .capture.grams import Fp64GramSink, gram_bytes, plan_gram_groups
 from .capture.hf import BoundaryCache, HFHookSource, decoder_layer_list
 from .models.harness import key_layer
 from .models.selector import matrix_type
-from .solve import (ERANK_RULE, ErasedComponent, apply_erasure, erased_component_gram,
+from .core.solve import (ERANK_RULE, ErasedComponent, apply_erasure, erased_component_gram,
                     erased_component_grams, factor_grams, gram_eig_extremes, leaks_gram,
                     leaks_grams, readout_gram, specificity, truncate_component)
 
@@ -100,7 +100,7 @@ def rank_rule_spec(rule):
     """Validate one rank rule: a ``lam_rel`` float in (0, 1) (keep
     ``r = #{j : sigma_j^2 > lam_rel sigma_1^2}`` of ``M X^T``) or ``"erank"``
     (``r = max(1, round(erank(M X^T)))``). Returns the spec
-    :func:`rspd.truncate_component` takes."""
+    :func:`rspd.core.truncate_component` takes."""
     if rule == ERANK_RULE:
         return ERANK_RULE
     if isinstance(rule, bool) or not isinstance(rule, (int, float)):
@@ -189,7 +189,7 @@ def lam_tags(li, name):
 class SolveState:
     """Everything the solve produced that the edit and the report need.
 
-    ``doses`` : list of :class:`~rspd.dose.Dose`; ``lam_settings`` : list of
+    ``doses`` : list of :class:`~rspd.core.dose.Dose`; ``lam_settings`` : list of
     ``{"dose_index", "rule"}``; ``diag_by_dose[i][name]`` : the full-rank leaks
     record of matrix ``name`` at dose ``i``; ``lam_info[li][name]`` : the
     truncated component's record; ``specificity[key]`` : per-input
@@ -311,14 +311,14 @@ def solve_pass(h, state, pkeys, grams, *, n_x, ridge_rel=0.0, eig_extremes=True,
     Per input and dose (``mu = dose.mu``):
 
     * ``readout``: the readout ``S = X G_mu^+`` spilled in fp32; per member the
-      full-rank component's leaks (:func:`rspd.leaks_gram`) and its own target
+      full-rank component's leaks (:func:`rspd.core.leaks_gram`) and its own target
       energy ``mx_energy = ||M X^T||^2``; then, per rank-truncated setting of the
       dose, ONE thin SVD of ``M X^T`` (``lam_svd_dtype``) from which every rule
-      slices ``M_r`` (:func:`rspd.truncate_component`), its factors spilled in
+      slices ``M_r`` (:func:`rspd.core.truncate_component`), its factors spilled in
       fp32.
-    * ``grams``: one :func:`rspd.factor_grams` per input and dose; per member
-      the dense component (:func:`rspd.erased_component_grams`) spilled in fp32
-      and its leaks (:func:`rspd.leaks_grams`).
+    * ``grams``: one :func:`rspd.core.factor_grams` per input and dose; per member
+      the dense component (:func:`rspd.core.erased_component_grams`) spilled in fp32
+      and its leaks (:func:`rspd.core.leaks_grams`).
     """
     progress = progress or _noop
     solver = state.solver
@@ -451,9 +451,34 @@ def solve_pass(h, state, pkeys, grams, *, n_x, ridge_rel=0.0, eig_extremes=True,
             torch.cuda.empty_cache()
 
 
+def build_component(state, key, name, Wf, dose_index, lam_index=None) -> ErasedComponent:
+    """The fp32 erased component of matrix ``name`` (input key ``key``) at one
+    setting, from the spills and the PRISTINE fp32 weight ``Wf``.
+
+    ``readout``, full rank: ``A = W X^T``, ``B = S`` (the spilled readout).
+    Truncated (``lam_index``): the spilled factors of ``M_r``. ``grams``: the
+    spilled dense component with ``B`` the identity.
+    """
+    dev = Wf.device
+    if state.solver == "grams":
+        Md = state.component_spill.get(component_tag(dose_index, name), device=dev,
+                                       dtype=torch.float32)
+        return ErasedComponent(Md, torch.eye(int(Wf.shape[1]), dtype=torch.float32, device=dev),
+                               {"formula": "W G_X (G_X + mu G_Y + delta I)^+",
+                                "B_is_identity": True})
+    if lam_index is None:
+        S = state.readouts.get(readout_tag(key, dose_index), device=dev, dtype=torch.float32)
+        Xd = state.X_of[key].to(device=dev, dtype=torch.float32)
+        return ErasedComponent(Wf @ Xd.T, S, {"formula": "(W X^T) S", "rank": None})
+    ta, tb = lam_tags(lam_index, name)
+    return ErasedComponent(state.lam_spill.get(ta, device=dev, dtype=torch.float32),
+                           state.lam_spill.get(tb, device=dev, dtype=torch.float32),
+                           {"formula": "U_r U_r^T (W X^T) S", "lam_index": lam_index})
+
+
 def apply_dose(h, store, state, dose_index, *, lam_index=None) -> dict:
     """Subtract one setting's erased component from every matrix, one matrix at
-    a time: ``W_new = W - M`` through :func:`rspd.apply_erasure`, written by
+    a time: ``W_new = W - M`` through :func:`rspd.core.apply_erasure`, written by
     ``store`` (:class:`~rspd.models.pristine.PristineStore`, which backs the
     pristine weight up first). Returns the edit accounting.
 
@@ -477,25 +502,7 @@ def apply_dose(h, store, state, dose_index, *, lam_index=None) -> dict:
             # explicit copy: get_weight aliases the live parameter
             Wf = h.get_weight(n).to(dtype=torch.float32, copy=True)
             dev = Wf.device
-            if grams_mode:
-                Md = state.component_spill.get(component_tag(dose_index, n), device=dev,
-                                               dtype=torch.float32)
-                comp = ErasedComponent(Md, torch.eye(int(Wf.shape[1]), dtype=torch.float32,
-                                                     device=dev),
-                                       {"formula": "W G_X (G_X + mu G_Y + delta I)^+",
-                                        "B_is_identity": True})
-            elif lam_index is None:
-                S = state.readouts.get(readout_tag(k, dose_index), device=dev,
-                                       dtype=torch.float32)
-                Xd = state.X_of[k].to(device=dev, dtype=torch.float32)
-                comp = ErasedComponent(Wf @ Xd.T, S, {"formula": "(W X^T) S", "rank": None})
-                del S, Xd
-            else:
-                ta, tb = lam_tags(lam_index, n)
-                comp = ErasedComponent(
-                    state.lam_spill.get(ta, device=dev, dtype=torch.float32),
-                    state.lam_spill.get(tb, device=dev, dtype=torch.float32),
-                    {"formula": "U_r U_r^T (W X^T) S", "lam_index": lam_index})
+            comp = build_component(state, k, n, Wf, dose_index, lam_index)
             store.write(n, apply_erasure(Wf, comp))
             M = comp.A if comp.info.get("B_is_identity") else comp.A @ comp.B
             dW = h.get_weight(n).to(dtype=torch.float32, copy=True).sub_(Wf)

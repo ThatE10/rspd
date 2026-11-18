@@ -1,4 +1,4 @@
-"""The SRSPD method runner: data spec -> :func:`rspd.erase` at every dose ->
+"""The SRSPD method runner: data spec -> :func:`rspd.api.erase` at every dose ->
 one exported checkpoint and one held-out readout per (dose, rank rule).
 
     from rspd.experiments.methods import srspd as srspd_runner
@@ -35,11 +35,11 @@ SRSPD run):
    with the run's tokenizer;
 2. the model is loaded (:func:`rspd.experiments.models.load_causal_lm`) and the
    baseline held-out CE scored;
-3. ONE :func:`rspd.erase` call (``apply=False``) runs one set of Gram passes,
+3. ONE :func:`rspd.api.erase` call (``apply=False``) runs one set of Gram passes,
    solves every ``mu_per_token`` and truncates every rank rule of each dose
    from one shared SVD of ``M X^T`` per matrix;
 4. every ``(dose, rule)`` setting is applied in turn
-   (:meth:`rspd.EditReport.apply_dose`), exported and scored: the full-rank
+   (:meth:`rspd.api.EditReport.apply_dose`), exported and scored: the full-rank
    edit ``W - M`` to ``<data root>/models/methods/<name>/srspd_mpt<mpt>/``,
    the truncated edits ``W - M_r`` to ``srspd_mpt<mpt>_lam<lam>`` /
    ``srspd_mpt<mpt>_erank`` beside it.
@@ -234,7 +234,7 @@ def run(config, *, model=None, tokenizer=None, out_root=None, log_root=None,
 
     exports, rows = {}, []
     with torch.no_grad():
-        rep = rspd.erase(model, target=data.target_ids, retained=retained,
+        rep = rspd.api.erase(model, target=data.target_ids, retained=retained,
                           mu_per_token=R["mu_per_token"], apply=False,
                           layers=R["layers"], solver=R["solver"],
                           rank_rule=list(R["rank_rule"]) or None,

@@ -20,7 +20,7 @@ leaks, switch the dose, restore the model and export the edit.
    * the printed leaks are `L_X_rel` and `L_Y_rel` for **every** edited matrix;
    * the second dose is applied with `report.apply_dose` (no second `erase`), and a larger
      `mu_per_token` gives a smaller `L_X_rel`;
-   * after `rspd.restore`, every parameter equals its pristine value (`torch.equal`);
+   * after `rspd.api.restore`, every parameter equals its pristine value (`torch.equal`);
    * the exported checkpoint reloads with `transformers` and equals the edited weights;
    * the agent never passes `mu` or `mu_raw` as a dose and never writes anything but
      `W − M` into the model.
