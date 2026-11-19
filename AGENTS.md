@@ -464,17 +464,4 @@ reduction order of the sharded matmuls and therefore the logprobs, so two number
 comparable only at the same TP. Every result row records `tp` (`None` for single-device HF
 evaluation); never put rows of different TP in one table, and evaluate a baseline and its
 edited model at the same TP. The software stack is part of the configuration too: reproduce
-under `constraints.txt`.
-
-## Deliberately not in the package
-
-| not here | status |
-| --- | --- |
-| clustering of erased components and circuit discovery / isolation | research-only; not released |
-| ASVD and the pull-back `[W X]_r X⁺` | issue #10 |
-| the synthetic shapes toy experiments | research-only, issue #9 |
-| a vLLM activation-capture backend (capture runs on resident HF models only) | deferred, issue #11 |
-| per-input-key doses chosen from the `γ` spectrum | issue #8 (`suggest_mu_per_token` only suggests one global grid) |
-
-Do not reimplement these inside `rspd`; the core stays: solve, COALA truncation of `M`,
-`W − M`, leaks, dose, Gram streaming, HF capture.
+under `constraints.txt`
