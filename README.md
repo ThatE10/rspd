@@ -1,6 +1,6 @@
-# rspd
+# Representation Space-aware Parameter Decomposition (RSPD)
 
-**Representation Space-aware Parameter Decomposition (RSPD): localize features within the parameter space.**
+**localize features within the parameter space.**
 
 <p align="center">
   <img src="assets/demo.gif" alt="A point moves through two overlapping sets X and Y in an input activation space. The layer W carries the whole space across. The component M carries only what X alone uses." width="460">
