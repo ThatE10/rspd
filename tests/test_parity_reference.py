@@ -1,7 +1,6 @@
 """Parity with the reference implementation the package was distilled from.
 
-If the reference repository is present (``$RSPD_REFERENCE_REPO``, default
-``/root/workspace/code``), its ``origin/main`` solve and effective-rank modules
+If the reference repository is present (``$RSPD_REFERENCE_REPO``), its ``origin/main`` solve and effective-rank modules
 are exported with ``git show`` into a temporary package (never imported from a
 working tree, which may sit on another branch) and the package's solve is
 checked against them to float64 round-off (<= 1e-12 relative) on random
@@ -24,7 +23,9 @@ torch = pytest.importorskip("torch")
 
 import rspd  # noqa: E402
 
-REPO = pathlib.Path(os.environ.get("RSPD_REFERENCE_REPO", "/root/workspace/code"))
+from reference_modules import reference_repo  # noqa: E402
+
+REPO = reference_repo()
 REF = "origin/main"
 FILES = {"erase": "rspd/erase.py", "erank": "rspd/erank.py"}
 PKG = "_rspd_parity_ref"
@@ -39,8 +40,8 @@ def _git_show(path):
 
 @pytest.fixture(scope="module")
 def ref(tmp_path_factory):
-    if shutil.which("git") is None or not (REPO / ".git").exists():
-        pytest.skip(f"reference repository not present at {REPO}")
+    if REPO is None:
+        pytest.skip("no reference checkout: set RSPD_REFERENCE_REPO to run the live parity tests")
     try:
         src = {k: _git_show(v) for k, v in FILES.items()}
     except subprocess.CalledProcessError as e:

@@ -23,7 +23,7 @@ jobs:
         stack: [oldest, pinned, latest]
         include:
           - stack: oldest
-            deps: "torch==2.4.1 transformers==4.55.4 numpy<2.3"
+            deps: "torch==2.4.1 transformers==4.55.4 'numpy<2.3'"
           - stack: pinned
             deps: "-c constraints.txt torch transformers"
           - stack: latest

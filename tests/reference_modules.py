@@ -9,9 +9,26 @@ this package side by side, so ``sys.modules`` has to hold one or the other:
 from __future__ import annotations
 
 import contextlib
+import os
+import pathlib
+import shutil
 import sys
 
 PKG = "rspd"
+
+
+def reference_repo():
+    """The reference checkout named by ``$RSPD_REFERENCE_REPO``, or ``None``
+    when the variable is unset, git is missing, or the path is not a readable
+    git checkout. The parity tests skip on ``None``."""
+    path = os.environ.get("RSPD_REFERENCE_REPO")
+    if not path or shutil.which("git") is None:
+        return None
+    repo = pathlib.Path(path)
+    try:
+        return repo if (repo / ".git").exists() else None
+    except OSError:
+        return None
 
 
 def _is_pkg(name, extra):

@@ -36,9 +36,9 @@ yaml = pytest.importorskip("yaml")
 pytest.importorskip("safetensors")
 
 from conftest import isolate_corpora  # noqa: E402
-from reference_modules import ModuleSwap  # noqa: E402
+from reference_modules import ModuleSwap, reference_repo  # noqa: E402
 
-REPO = pathlib.Path(os.environ.get("RSPD_REFERENCE_REPO", "/root/workspace/code"))
+REPO = reference_repo()
 REF = "origin/main"
 _PKG = "rs" + "pd"                                   # the reference's package name
 _DRV_DIR = "experi" + "ments/" + "wm" + "dp"
@@ -53,8 +53,8 @@ SKIP_KEY = "skip_" + SUB_KEY
 
 @pytest.fixture(scope="module")
 def ref(tmp_path_factory):
-    if shutil.which("git") is None or not (REPO / ".git").exists():
-        pytest.skip(f"reference repository not present at {REPO}")
+    if REPO is None:
+        pytest.skip("no reference checkout: set RSPD_REFERENCE_REPO to run the live parity tests")
     proc = subprocess.run(["git", "-C", str(REPO), "archive", "--format=tar", REF, *PATHS],
                           capture_output=True)
     if proc.returncode != 0:
