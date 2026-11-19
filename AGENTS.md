@@ -9,10 +9,17 @@ component `M` from the activations of a **target** set (to erase) and a **retain
 Python blocks marked `python runnable` in this file are executed by the test suite on a tiny
 random-weight GPT-2 with no network (`tests/test_docs_core.py`).
 
+Two ways in, same solve. The class: `SRSPD(model, tokenizer).fit(target=, retained=,
+mu_per_token=)` returns `Components` (one `Component` with factors `A`, `B` per matrix) and
+leaves the model alone until `components.apply()`. The function it wraps: `rspd.api.erase(...)`
+returns an `EditReport` and applies the edit unless told not to. `components.report` is that
+same `EditReport`. This file describes the function, because its arguments and its report are
+where the detail is; everything said here holds for the class.
+
 ## Setup
 
-Either install from git at a pinned commit (the repository is private; your git needs read
-access):
+Either install it (`pip install "rspd[hf]"`; until the first release, from git at a pinned
+commit):
 
 ```bash
 pip install "rspd[hf] @ git+https://github.com/ThatE10/rspd@<sha>"
@@ -22,14 +29,14 @@ or, inside a checkout whose environment already has `torch` and `transformers`, 
 sources on the path; the CLI is then `python -m rspd.cli` instead of `rspd`:
 
 ```bash
-export PYTHONPATH=$PWD/src:$PWD/packages/rspd[experiments]/src
+export PYTHONPATH=$PWD/src
 python -c "import rspd; print(rspd.__version__)"
 python -m rspd.cli inspect gpt2        # == `rspd inspect gpt2` when installed
 python -m pytest -q                     # the whole suite, from the repository root
 ```
 
-`import rspd` needs only `torch`; the model-level API (`erase`, `inspect_model`, export,
-the CLI) needs `transformers` and `safetensors` (the `[hf]` extra).
+`import rspd` needs only `torch`; the model-level API (`SRSPD`, `rspd.api.erase`,
+`inspect_model`, export, the CLI) needs `transformers` and `safetensors` (the `[hf]` extra).
 
 ## The five rules, and why
 

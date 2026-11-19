@@ -8,11 +8,11 @@ version = "0.0.1"
 description = "Closed-form selective erasure of behaviour from a model's linear layers, by subtraction."
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["torch>=2.0"]
+dependencies = ["torch>=2.4"]
 
 [project.optional-dependencies]
-hf = ["transformers", "safetensors"]
-experiments = ["transformers", "safetensors", "accelerate", "datasets", "pyyaml", "numpy"]
+hf = ["transformers>=4.55", "safetensors"]
+experiments = ["transformers>=4.55", "safetensors", "accelerate", "datasets", "pyyaml", "numpy"]
 eval = ["lm_eval==0.4.12", "vllm==0.26.0"]
 muse = ["rouge_score", "scikit-learn", "scipy"]
 test = ["pytest", "numpy"]

@@ -72,8 +72,16 @@ def gemma3_multimodal(seed=0, dtype=torch.float32):
     return T.Gemma3ForConditionalGeneration(cfg).to(dtype).eval()
 
 
-def _gemma4_text_cfg(n_kv_shared):
+def _need_gemma4():
     T = _t()
+    if not hasattr(T, "Gemma4TextConfig"):
+        import pytest
+        pytest.skip(f"transformers {T.__version__} has no Gemma-4")
+    return T
+
+
+def _gemma4_text_cfg(n_kv_shared):
+    T = _need_gemma4()
     return T.Gemma4TextConfig(
         vocab_size=VOCAB, hidden_size=16, intermediate_size=32, num_hidden_layers=4,
         num_attention_heads=2, num_key_value_heads=1, head_dim=8, global_head_dim=16,
@@ -84,13 +92,13 @@ def _gemma4_text_cfg(n_kv_shared):
 
 
 def gemma4_text(seed=0, dtype=torch.float32, n_kv_shared=2):
-    T = _t()
+    T = _need_gemma4()
     torch.manual_seed(seed)
     return T.Gemma4ForCausalLM(_gemma4_text_cfg(n_kv_shared)).to(dtype).eval()
 
 
 def gemma4_multimodal(seed=0, dtype=torch.float32, n_kv_shared=2):
-    T = _t()
+    T = _need_gemma4()
     torch.manual_seed(seed)
     vc = T.Gemma4VisionConfig(hidden_size=16, intermediate_size=32, num_hidden_layers=1,
                               num_attention_heads=2, num_key_value_heads=2, head_dim=8)

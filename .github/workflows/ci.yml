@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 5 * * 1"        # weekly, against the newest torch and transformers
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: tests (py${{ matrix.python }}, ${{ matrix.stack }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12"]
+        stack: [oldest, pinned, latest]
+        include:
+          - stack: oldest
+            deps: "torch==2.4.1 transformers==4.55.4 numpy<2.3"
+          - stack: pinned
+            deps: "-c constraints.txt torch transformers"
+          - stack: latest
+            deps: "torch transformers"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install --extra-index-url https://download.pytorch.org/whl/cpu ${{ matrix.deps }}
+          pip install -e ".[hf,experiments,test,examples]" pillow
+          python -m ipykernel install --user --name python3
+          python -c "import torch, transformers; print(torch.__version__, transformers.__version__)"
+      - name: Tests, documentation examples and example notebooks
+        run: python -m pytest -q
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - name: Syntax errors and undefined names
+        run: ruff check src tests assets --select E9,F63,F7,F82
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build twine
+      - run: python -m build
+      - run: twine check dist/*
+      - name: The wheel imports with torch alone
+        run: |
+          pip install --extra-index-url https://download.pytorch.org/whl/cpu dist/*.whl
+          python -c "import rspd, rspd.core, rspd.toy; print(rspd.__version__, rspd.__all__)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  animation:
+    name: README animation renders
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'animation')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: LaTeX, ffmpeg, cairo
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends ffmpeg gifsicle libcairo2-dev \
+            libpango1.0-dev pkg-config texlive-latex-base texlive-latex-extra \
+            texlive-latex-recommended texlive-fonts-recommended cm-super dvisvgm
+      - run: |
+          pip install --extra-index-url https://download.pytorch.org/whl/cpu torch
+          pip install -e . manim pillow
+      - run: python assets/make_demo.py
+      - name: Under ten seconds and a few megabytes
+        run: |
+          python - <<'PY'
+          import pathlib
+          from PIL import Image
+          p = pathlib.Path("assets/demo.gif")
+          im = Image.open(p)
+          ms = 0
+          for i in range(im.n_frames):
+              im.seek(i); ms += im.info.get("duration", 0)
+          print(p.stat().st_size, "bytes,", ms, "ms")
+          assert p.stat().st_size < 4 * 2**20 and ms < 10_000
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: demo-gif
+          path: assets/demo.gif

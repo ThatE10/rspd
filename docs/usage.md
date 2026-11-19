@@ -1,4 +1,4 @@
-# rspd
+# Using rspd
 
 Closed-form selective erasure of a behaviour from a model's linear layers, by subtraction.
 
@@ -17,23 +17,47 @@ Agents: read `AGENTS.md` at the repository root first. Method: `docs/math.md`. A
 
 ## Install
 
-The repository is private; there is no public release. Install from git at a pinned commit
-(your git needs read access to the repository, over HTTPS credentials or SSH):
-
 ```bash
-pip install "rspd[hf] @ git+https://github.com/ThatE10/rspd@<sha>"
-# core only (torch): pip install "git+https://github.com/ThatE10/rspd@<sha>"
-# over SSH:          pip install "rspd[hf] @ git+ssh://git@github.com/ThatE10/rspd.git@<sha>"
+pip install rspd                 # the tensor API (torch only)
+pip install "rspd[hf]"           # + Hugging Face models and the command line
+pip install "rspd[experiments]"  # + data builders, baselines, evaluation (docs/experiments.md)
 ```
+
+Until the first release, install from git:
+`pip install "rspd[hf] @ git+https://github.com/ThatE10/rspd@<sha>"`.
 
 | extra | adds | needed for |
 | --- | --- | --- |
-| (none) | `torch>=2.0` | the tensor API: solve, truncation, `apply_erasure`, leaks, dose, COALA |
-| `hf` | `transformers`, `safetensors` | `rspd.api.erase` / `inspect_model` / export on Hugging Face models, the `rspd` CLI |
+| (none) | `torch>=2.4` | `rspd.core` (solve, truncation, `apply_erasure`, leaks, dose, COALA), `rspd.toy` |
+| `hf` | `transformers`, `safetensors` | `SRSPD`, `inspect_model`, export on Hugging Face models, the `rspd` command |
+| `experiments` | `datasets`, `accelerate`, `pyyaml`, `numpy` and the `hf` extra | `rspd.experiments` |
+| `examples` | `matplotlib` and notebook tooling | running `examples/` and their tests |
 | `test` | `pytest`, `numpy` | the test suite |
 
-`import rspd` needs only `torch`; `transformers` is imported where it is used. Building a
-wheel and pinning from another repository: `docs/releasing.md`.
+`import rspd` needs only `torch`; `transformers` is imported where it is used. Tested on
+Python 3.10 to 3.12 with `torch` 2.4 and `transformers` 4.55 up to the current releases.
+
+## The interface
+
+```python runnable
+from rspd import SRSPD
+
+srspd = SRSPD(model, tokenizer)                 # attach: any loaded Hugging Face causal LM
+components = srspd.fit(target=target, retained=retained, mu_per_token=[0.3, 1.0])
+print(components.names[:2], components.settings)  # matrices; (mu_per_token, rank_rule) settings
+
+c = components[components.names[0]]             # a Component: M = c.A @ c.B
+print(c.name, tuple(c.A.shape), tuple(c.B.shape), c.leaks)
+
+components.apply(1.0)                           # W <- W - M at that dose
+components.apply(0.3)                           # another dose, no second pass over the data
+components.restore()                            # bit for bit
+components.close()
+```
+
+`fit` never changes the model. `components.report` is the full record of the solve (the
+`EditReport` described in `AGENTS.md`); `SRSPD` is a thin class over `rspd.api.erase`, which
+the rest of this page and `AGENTS.md` use directly.
 
 ## Minimal example
 

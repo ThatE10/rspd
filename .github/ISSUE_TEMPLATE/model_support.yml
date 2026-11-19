@@ -1,0 +1,22 @@
+name: Model support
+description: A model family rspd does not handle, or handles wrongly
+labels: [model-support]
+body:
+  - type: input
+    id: model
+    attributes:
+      label: Model
+      description: Hub id.
+    validations:
+      required: true
+  - type: textarea
+    id: inspect
+    attributes:
+      label: Output of `rspd inspect <model>`
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: What goes wrong

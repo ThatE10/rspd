@@ -119,8 +119,12 @@ def _cmd_erase(a):
     from .api import erase
     from .models.export import export_checkpoint
     tok = transformers.AutoTokenizer.from_pretrained(a.model)
-    model = transformers.AutoModelForCausalLM.from_pretrained(
-        a.model, dtype=getattr(torch, a.dtype)).to(a.device).eval()
+    dtype = getattr(torch, a.dtype)
+    try:
+        model = transformers.AutoModelForCausalLM.from_pretrained(a.model, dtype=dtype)
+    except TypeError:               # transformers before 4.56 names the argument torch_dtype
+        model = transformers.AutoModelForCausalLM.from_pretrained(a.model, torch_dtype=dtype)
+    model = model.to(a.device).eval()
     target = _tokenize(tok, _read_docs(a.target), a.max_length)
     retained = _tokenize(tok, _read_docs(a.retained), a.max_length)
     mpt = a.mu_per_token if len(a.mu_per_token) > 1 else a.mu_per_token[0]

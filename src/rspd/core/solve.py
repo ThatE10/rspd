@@ -1088,7 +1088,7 @@ def gram_eig_extremes(G, *, iters=200, tol=1e-7, seed=0):
     if not pd:
         return 0.0, lam_max, dict(pd=False, iters_max=it_max, rel_max=rel_max)
     L.tril_()
-    inv_top, it_min, rel_min = power(lambda v: torch.cholesky_solve(v, L))
+    inv_top, it_min, rel_min = power(lambda v: torch.cholesky_solve(v, L))  # noqa: F821
     del L
     lam_min = 1.0 / inv_top if inv_top > 0 else 0.0
     return lam_min, lam_max, dict(pd=True, iters_max=it_max, rel_max=rel_max,

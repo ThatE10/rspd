@@ -8,7 +8,7 @@ leaks, switch the dose, restore the model and export the edit.
 
 1. Start an agent with an empty context, the repository checkout and an environment that
    has `torch` and `transformers` but not necessarily an installed `rspd`. Give it
-   `AGENTS.md` and this task, and forbid reading anything under `packages/` or `docs/`:
+   `AGENTS.md` and this task, and forbid reading anything under `src/` or `docs/`:
 
    > Using a tiny random-weight GPT-2, write and run a script that inspects the model,
    > erases with a `mu_per_token`, prints the leaks of every edited matrix, switches to a

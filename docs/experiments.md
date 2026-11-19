@@ -7,16 +7,12 @@ at the repository root first; the API is in `docs/api.md`.
 
 ## Install
 
-The repository is private; there is no public release. `rspd[experiments]` depends on
-`rspd[hf]`, which is not on any package index, so install both from git at the **same**
-commit in one command (your git needs read access to the repository):
-
 ```bash
-SHA=<commit>
-pip install \
-  "rspd[hf] @ git+https://github.com/ThatE10/rspd@$SHA" \
-  "rspd[experiments][eval,muse] @ git+https://github.com/ThatE10/rspd@$SHA#subdirectory=packages/rspd[experiments]"
+pip install "rspd[experiments]"                # + eval, muse for the evaluation harnesses
 ```
+
+Until the first release, install from git:
+`pip install "rspd[experiments,eval,muse] @ git+https://github.com/ThatE10/rspd@<sha>"`.
 
 To reproduce published numbers, install from a checkout under the pinned stack:
 
@@ -29,7 +25,7 @@ export RSPD_DATA_DIR=/data/rspd        # default ~/.cache/rspd: datasets/, logs/
 
 | extra | adds | needed for |
 | --- | --- | --- |
-| (none) | `rspd[hf]`, `datasets`, `pyyaml`, `numpy` | data builders, method runners, recipes, `compare` |
+| `experiments` | `rspd[hf]`, `accelerate`, `datasets`, `pyyaml`, `numpy` | data builders, method runners, recipes, `compare` |
 | `eval` | `lm_eval`, `vllm` (pinned) | `eval.lm_eval` (WMDP, MMLU, WikiText, Global-MMLU) |
 | `muse` | `rouge_score`, `scikit-learn`, `scipy` | the MUSE evaluator |
 | `test` | `pytest` | the test suite |
