@@ -30,7 +30,8 @@ import torch
 
 from .core.dose import dose_from_mu_per_token
 
-__all__ = ["TwoSets", "two_sets", "carried", "activation"]
+__all__ = ["TwoSets", "two_sets", "carried", "activation", "tiny_language_model",
+           "tiny_texts"]
 
 
 @dataclass
@@ -95,3 +96,49 @@ def activation(toy: TwoSets, in_x: float, in_y: float, phase: float = 0.0) -> to
     w = torch.tensor([in_x if g == "x" else in_y if g == "y" else max(in_x, in_y)
                       for g in toy.groups], dtype=torch.float64)
     return w * base
+
+
+# --------------------------------------------------------------------------- #
+# a tiny random language model, for trying the model interface with no download #
+# --------------------------------------------------------------------------- #
+_LANGUAGES = ("nl", "en", "de", "fr")
+_WORDS_PER_LANGUAGE = 24
+
+
+def tiny_texts(n=12, words=40, seed=0) -> dict:
+    """``{"nl": [...], "en": [...], "de": [...], "fr": [...]}``: ``n`` made-up
+    documents per language, each language with its own vocabulary (``nl3``,
+    ``en17``, ...). Stands in for real text wherever the code only needs
+    strings in several "languages"."""
+    gen = torch.Generator().manual_seed(seed)
+    out = {}
+    for lang in _LANGUAGES:
+        ids = torch.randint(0, _WORDS_PER_LANGUAGE, (n, words), generator=gen)
+        out[lang] = [" ".join(f"{lang}{int(i)}" for i in row) for row in ids]
+    return out
+
+
+def tiny_language_model(seed=0):
+    """``(model, tokenizer)``: a two-block random decoder of the Qwen3 family
+    and a word-level tokenizer over the vocabulary of :func:`tiny_texts`, with a
+    chat template. Nothing is downloaded and it runs on a CPU; its outputs mean
+    nothing. Needs ``transformers`` (the ``hf`` extra)."""
+    import transformers
+    from tokenizers import Tokenizer, models, pre_tokenizers
+
+    vocab = {"<|endoftext|>": 0, "[UNK]": 1}
+    for lang in _LANGUAGES:
+        for i in range(_WORDS_PER_LANGUAGE):
+            vocab[f"{lang}{i}"] = len(vocab)
+    tk = Tokenizer(models.WordLevel(vocab=vocab, unk_token="[UNK]"))
+    tk.pre_tokenizer = pre_tokenizers.Whitespace()
+    tokenizer = transformers.PreTrainedTokenizerFast(
+        tokenizer_object=tk, eos_token="<|endoftext|>", bos_token="<|endoftext|>",
+        pad_token="<|endoftext|>", unk_token="[UNK]")
+    tokenizer.chat_template = "{% for m in messages %}{{ m['content'] }} {% endfor %}"
+    torch.manual_seed(seed)
+    config = transformers.Qwen3Config(
+        vocab_size=len(vocab), hidden_size=32, intermediate_size=64, num_hidden_layers=2,
+        num_attention_heads=2, num_key_value_heads=1, head_dim=16, max_position_embeddings=512,
+        bos_token_id=0, eos_token_id=0, pad_token_id=0)
+    return transformers.Qwen3ForCausalLM(config).eval(), tokenizer

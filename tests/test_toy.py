@@ -54,3 +54,22 @@ def test_a_moving_point_is_active_where_it_stands():
     assert (in_x[toy.index("y")] == 0).all() and (in_x[toy.index("x")] != 0).all()
     assert (in_y[toy.index("x")] == 0).all() and (in_y[toy.index("y")] != 0).all()
     assert (both != 0).all()
+
+
+def test_the_tiny_language_model_goes_through_the_model_interface():
+    pytest.importorskip("transformers")
+    from rspd import SRSPD
+    model, tokenizer = rspd.toy.tiny_language_model()
+    texts = rspd.toy.tiny_texts()
+    assert set(texts) == {"nl", "en", "de", "fr"} and len(texts["nl"]) == 12
+    ids = tokenizer(texts["nl"][0], return_tensors="pt").input_ids
+    assert int(ids.max()) < model.config.vocab_size and 1 not in ids          # no unknown words
+    chat = tokenizer.apply_chat_template([{"role": "user", "content": texts["en"][0]}],
+                                         tokenize=False)
+    assert chat.startswith("en")
+    comps = SRSPD(model, tokenizer).fit(target=texts["nl"], retained=texts["en"] + texts["de"],
+                                        mu_per_token=0.1)
+    assert len(comps) == 14                       # seven projections in each of two blocks
+    comps.apply()
+    assert comps.applied and comps.restore()
+    comps.close()
