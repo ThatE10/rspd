@@ -1,6 +1,8 @@
 # Using rspd
 
-Closed-form selective erasure of a behaviour from a model's linear layers, by subtraction.
+Representation Space-aware Parameter Decomposition (RSPD): localize features within the parameter
+space. The supervised variant, SRSPD, removes a behaviour from a model's linear layers in closed
+form, by subtraction.
 
 For each selected weight `W`, with `X` the input activations of the behaviour to erase
 (the **target** set) and `Y` those of the behaviour to keep (the **retained** set), `rspd`

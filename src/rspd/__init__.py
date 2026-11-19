@@ -1,4 +1,5 @@
-"""rspd: find the component of a model's weights that one behaviour uses and
+"""rspd: Representation Space-aware Parameter Decomposition. Localize features within
+the parameter space: find the component of a model's weights that one behaviour uses and
 another does not, in closed form, and subtract it.
 
     from rspd import SRSPD

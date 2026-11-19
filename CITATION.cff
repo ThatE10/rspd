@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it and the works it builds on."
-title: "rspd: Representation-Space Parameter Decomposition"
+title: "rspd: Representation Space-aware Parameter Decomposition"
 type: software
 repository-code: "https://github.com/ThatE10/rspd"
 references:

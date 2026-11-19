@@ -1,6 +1,6 @@
 # rspd
 
-**Find the part of a model's weights that one behaviour uses and another does not, in closed form, and take it out.**
+**Representation Space-aware Parameter Decomposition (RSPD): localize features within the parameter space.**
 
 <p align="center">
   <img src="assets/demo.gif" alt="A point moves through two overlapping sets X and Y in an input activation space. The layer W carries the whole space across. The component M carries only what X alone uses." width="640">
@@ -77,7 +77,7 @@ If you use `rspd`, please cite it. [`CITATION.cff`](CITATION.cff) has the machin
 
 ```bibtex
 @software{rspd,
-  title = {rspd: Representation-Space Parameter Decomposition},
+  title = {rspd: Representation Space-aware Parameter Decomposition},
   url   = {https://github.com/ThatE10/rspd},
   year  = {2026}
 }

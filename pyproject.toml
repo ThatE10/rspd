@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "rspd"
 version = "0.0.1"
-description = "Closed-form selective erasure of behaviour from a model's linear layers, by subtraction."
+description = "Representation Space-aware Parameter Decomposition (RSPD): localize features within the parameter space."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["torch>=2.4"]
