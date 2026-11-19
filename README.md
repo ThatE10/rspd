@@ -24,7 +24,7 @@ from rspd import SRSPD
 
 model = AutoModelForCausalLM.from_pretrained("gpt2")
 tokenizer = AutoTokenizer.from_pretrained("gpt2")
-dutch, english = ["De kat zit op de mat."], ["The cat sits on the mat."]  # your two sets of text
+dutch, english = ["De kat zit op de mat."], ["The cat sits on the mat."]  # placeholders, see below
 
 srspd = SRSPD(model, tokenizer)                    # attach
 components = srspd.fit(target=dutch, retained=english, mu_per_token=1.0)
@@ -32,7 +32,7 @@ components.apply()                                 # W <- W - M in every layer
 components.restore()                               # bit-for-bit undo
 ```
 
-`target` is the behaviour to remove and `retained` is the behaviour to keep; in practice each is a few thousand tokens or more. `fit` does not change the model. It returns one `Component` per weight matrix, with its factors `A` and `B` (`M = A @ B`) and its leaks. `mu_per_token` is the dose: larger removes more.
+`target` is the behaviour to remove and `retained` is the behaviour to keep. The one-sentence lists above only show the shape of the call: with so little text the edit damages everything. A real fit wants about a thousand tokens of target and tens of thousands of retained text, as in the [Dutch example](examples/erase_dutch.ipynb). `fit` does not change the model. It returns one `Component` per weight matrix, with its factors `A` and `B` (`M = A @ B`) and its leaks. `mu_per_token` is the dose: larger removes more.
 
 ## How it works
 

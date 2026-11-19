@@ -134,7 +134,8 @@ def tiny_language_model(seed=0):
     tk.pre_tokenizer = pre_tokenizers.Whitespace()
     tokenizer = transformers.PreTrainedTokenizerFast(
         tokenizer_object=tk, eos_token="<|endoftext|>", bos_token="<|endoftext|>",
-        pad_token="<|endoftext|>", unk_token="[UNK]")
+        pad_token="<|endoftext|>", unk_token="[UNK]",
+        model_input_names=["input_ids", "attention_mask"])
     tokenizer.chat_template = "{% for m in messages %}{{ m['content'] }} {% endfor %}"
     torch.manual_seed(seed)
     config = transformers.Qwen3Config(
