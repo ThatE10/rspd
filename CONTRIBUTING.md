@@ -4,7 +4,7 @@
 
 ```bash
 git clone https://github.com/ThatE10/rspd && cd rspd
-pip install -e ".[hf,experiments,test,examples]"
+pip install -e ".[experiments,test,examples]"
 python -m pytest -q
 ```
 

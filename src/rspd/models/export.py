@@ -10,7 +10,7 @@ loader that constructs them unconditionally accepts the export. Neither
 framework reads those tensors on a shared layer, so the source values are
 copied verbatim.
 
-``safetensors`` / ``huggingface_hub`` are imported lazily (the ``[hf]`` extra).
+``safetensors`` / ``huggingface_hub`` are imported lazily.
 """
 from __future__ import annotations
 

@@ -18,11 +18,11 @@ where the detail is; everything said here holds for the class.
 
 ## Setup
 
-Either install it (`pip install "rspd[hf]"`; until the first release, from git at a pinned
+Either install it (`pip install rspd`; until the first release, from git at a pinned
 commit):
 
 ```bash
-pip install "rspd[hf] @ git+https://github.com/ThatE10/rspd@<sha>"
+pip install "rspd @ git+https://github.com/ThatE10/rspd@<sha>"
 ```
 
 or, inside a checkout whose environment already has `torch` and `transformers`, put the
@@ -36,7 +36,7 @@ python -m pytest -q                     # the whole suite, from the repository r
 ```
 
 `import rspd` needs only `torch`; the model-level API (`SRSPD`, `rspd.api.erase`,
-`inspect_model`, export, the CLI) needs `transformers` and `safetensors` (the `[hf]` extra).
+`inspect_model`, export, the CLI) needs `transformers` and `safetensors`, which `pip install rspd` brings.
 
 ## The five rules, and why
 

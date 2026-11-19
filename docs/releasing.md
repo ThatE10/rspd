@@ -50,7 +50,7 @@ twine check dist/*
 ## Installing an unreleased commit
 
 ```bash
-pip install "rspd[hf] @ git+https://github.com/ThatE10/rspd@<sha>"
+pip install "rspd @ git+https://github.com/ThatE10/rspd@<sha>"
 pip install "rspd[experiments,eval,muse] @ git+https://github.com/ThatE10/rspd@<sha>"
 ```
 

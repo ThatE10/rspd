@@ -122,7 +122,7 @@ def tiny_language_model(seed=0):
     """``(model, tokenizer)``: a two-block random decoder of the Qwen3 family
     and a word-level tokenizer over the vocabulary of :func:`tiny_texts`, with a
     chat template. Nothing is downloaded and it runs on a CPU; its outputs mean
-    nothing. Needs ``transformers`` (the ``hf`` extra)."""
+    nothing. Needs ``transformers``."""
     import transformers
     from tokenizers import Tokenizer, models, pre_tokenizers
 

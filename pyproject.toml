@@ -8,11 +8,12 @@ version = "0.0.1"
 description = "Representation Space-aware Parameter Decomposition (RSPD): localize features within the parameter space."
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["torch>=2.4"]
+dependencies = ["torch>=2.4", "transformers>=4.55", "safetensors"]
 
 [project.optional-dependencies]
-hf = ["transformers>=4.55", "safetensors"]
-experiments = ["transformers>=4.55", "safetensors", "accelerate", "datasets", "pyyaml", "numpy"]
+# hf is kept so that `rspd[hf]` in older install lines still resolves; it adds nothing now.
+hf = []
+experiments = ["accelerate", "datasets", "pyyaml", "numpy"]
 eval = ["lm_eval==0.4.12", "vllm==0.26.0"]
 muse = ["rouge_score", "scikit-learn", "scipy"]
 test = ["pytest", "numpy"]

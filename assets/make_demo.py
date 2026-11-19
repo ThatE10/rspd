@@ -251,7 +251,7 @@ def build_scene(data=None):
     return IsolateGif
 
 
-def render(out=HERE / "demo.gif", *, width=800, height=600, fps=20, colors=96, seed=SEED,
+def render(out=HERE / "demo.gif", *, width=560, height=420, fps=20, colors=96, seed=SEED,
            mu_per_token=MU_PER_TOKEN) -> pathlib.Path:
     """Render the scene to ``out`` (a GIF). Needs manim, LaTeX and ffmpeg.
 

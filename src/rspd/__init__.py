@@ -21,8 +21,7 @@ Public names: :class:`SRSPD` (the supervised variant), :class:`Component` and
 :func:`export_checkpoint`. The tensor-level mathematics is :mod:`rspd.core`;
 model handling is :mod:`rspd.models` and :mod:`rspd.capture`; the function the
 class wraps is :func:`rspd.api.erase`. Only ``torch`` is needed to import the
-package; ``transformers`` and ``safetensors`` (the ``[hf]`` extra) are imported
-where used. Command line: ``rspd inspect | erase | report``.
+package; ``transformers`` and ``safetensors`` are imported where used. Command line: ``rspd inspect | erase | report``.
 """
 from __future__ import annotations
 

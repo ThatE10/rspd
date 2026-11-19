@@ -1,5 +1,5 @@
 """The core package imports with torch alone: ``transformers`` / ``safetensors``
-(the ``[hf]`` extra) are imported lazily where used. Run in a subprocess with
+are imported lazily where used. Run in a subprocess with
 both blocked by a meta-path finder."""
 from __future__ import annotations
 

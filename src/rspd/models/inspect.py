@@ -26,7 +26,7 @@ def load_skeleton(model_id: str, *, trust_remote_code: bool = False):
         import transformers
     except ImportError as e:
         raise ImportError("inspect_model(<model id>) needs transformers (pip install "
-                          "'rspd[hf]'); or pass an instantiated model") from e
+                          "'rspd'); or pass an instantiated model") from e
     cfg = transformers.AutoConfig.from_pretrained(model_id, trust_remote_code=trust_remote_code)
     errors = []
     for cls_name in ("AutoModelForCausalLM", "AutoModelForImageTextToText", "AutoModel"):

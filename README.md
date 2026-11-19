@@ -3,7 +3,7 @@
 **Representation Space-aware Parameter Decomposition (RSPD): localize features within the parameter space.**
 
 <p align="center">
-  <img src="assets/demo.gif" alt="A point moves through two overlapping sets X and Y in an input activation space. The layer W carries the whole space across. The component M carries only what X alone uses." width="640">
+  <img src="assets/demo.gif" alt="A point moves through two overlapping sets X and Y in an input activation space. The layer W carries the whole space across. The component M carries only what X alone uses." width="460">
 </p>
 
 > **Status.** Currently implements the supervised variant (SRSPD). The unsupervised variant is coming soon — end of 2026!
@@ -14,7 +14,9 @@
 pip install rspd
 ```
 
-`rspd` needs only `torch`. Add `rspd[hf]` to work on Hugging Face models, and `rspd[experiments]` for the data builders, baselines and evaluation used in the experiments.
+This installs `torch`, `transformers` and `safetensors`, which is what working on Hugging Face models needs. `rspd[experiments]` adds the data builders, baselines and evaluation used in the experiments.
+
+The mathematics in `rspd.core` needs only `torch`. For that alone: `pip install --no-deps rspd`, with `torch` already installed.
 
 ## Quickstart
 

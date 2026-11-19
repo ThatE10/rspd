@@ -47,12 +47,12 @@ def test_the_column_shows_the_point_s_activation(demo):
 def test_the_committed_gif_is_small_and_short(demo):
     gif = ASSETS / "demo.gif"
     assert gif.is_file(), "render it with: python assets/make_demo.py"
-    assert gif.stat().st_size < 4 * 2 ** 20
+    assert gif.stat().st_size < 2 * 2 ** 20
     Image = pytest.importorskip("PIL.Image")
     with Image.open(gif) as im:
         ms = 0
         for i in range(im.n_frames):
             im.seek(i)
             ms += im.info.get("duration", 0)
-        assert im.size == (800, 600) and 3_000 < ms < 10_000, ms
+        assert im.size == (560, 420) and 3_000 < ms < 10_000, ms
         assert im.info.get("loop", 1) == 0                              # loops forever

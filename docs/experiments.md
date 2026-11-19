@@ -25,7 +25,7 @@ export RSPD_DATA_DIR=/data/rspd        # default ~/.cache/rspd: datasets/, logs/
 
 | extra | adds | needed for |
 | --- | --- | --- |
-| `experiments` | `rspd[hf]`, `accelerate`, `datasets`, `pyyaml`, `numpy` | data builders, method runners, recipes, `compare` |
+| `experiments` | `accelerate`, `datasets`, `pyyaml`, `numpy` | data builders, method runners, recipes, `compare` |
 | `eval` | `lm_eval`, `vllm` (pinned) | `eval.lm_eval` (WMDP, MMLU, WikiText, Global-MMLU) |
 | `muse` | `rouge_score`, `scikit-learn`, `scipy` | the MUSE evaluator |
 | `test` | `pytest` | the test suite |

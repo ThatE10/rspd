@@ -20,23 +20,25 @@ Agents: read `AGENTS.md` at the repository root first. Method: `docs/math.md`. A
 ## Install
 
 ```bash
-pip install rspd                 # the tensor API (torch only)
-pip install "rspd[hf]"           # + Hugging Face models and the command line
+pip install rspd                 # torch, transformers, safetensors: everything for Hugging Face models
 pip install "rspd[experiments]"  # + data builders, baselines, evaluation (docs/experiments.md)
+pip install --no-deps rspd       # the code alone; with torch installed this runs rspd.core and rspd.toy
 ```
 
 Until the first release, install from git:
-`pip install "rspd[hf] @ git+https://github.com/ThatE10/rspd@<sha>"`.
+`pip install "rspd @ git+https://github.com/ThatE10/rspd@<sha>"`.
 
-| extra | adds | needed for |
+| install | adds | needed for |
 | --- | --- | --- |
-| (none) | `torch>=2.4` | `rspd.core` (solve, truncation, `apply_erasure`, leaks, dose, COALA), `rspd.toy` |
-| `hf` | `transformers`, `safetensors` | `SRSPD`, `inspect_model`, export on Hugging Face models, the `rspd` command |
-| `experiments` | `datasets`, `accelerate`, `pyyaml`, `numpy` and the `hf` extra | `rspd.experiments` |
-| `examples` | `matplotlib` and notebook tooling | running `examples/` and their tests |
-| `test` | `pytest`, `numpy` | the test suite |
+| `rspd` | `torch>=2.4`, `transformers>=4.55`, `safetensors` | `SRSPD`, `inspect_model`, export on Hugging Face models, the `rspd` command, `rspd.core`, `rspd.toy` |
+| `rspd[experiments]` | `accelerate`, `datasets`, `pyyaml`, `numpy` | `rspd.experiments` |
+| `rspd[examples]` | `matplotlib` and notebook tooling | running `examples/` and their tests |
+| `rspd[test]` | `pytest`, `numpy` | the test suite |
+| `--no-deps` | nothing | the tensor API with only `torch` present (there is no extra for this: an extra can add packages, not remove them) |
 
-`import rspd` needs only `torch`; `transformers` is imported where it is used. Tested on
+`rspd[hf]` still resolves and is the same as `rspd`.
+
+`import rspd` itself touches only `torch`; `transformers` is imported where it is used. Tested on
 Python 3.10 to 3.12 with `torch` 2.4 and `transformers` 4.55 up to the current releases.
 
 ## The interface
@@ -97,7 +99,7 @@ W_new = rspd.core.apply_erasure(W, comp)                      # W − M, the onl
 print(rspd.core.leaks(W, comp, X, Y)["L_X_rel"], dose.as_dict())
 ```
 
-Command line (`[hf]` extra), each command printing one JSON document:
+Command line, each command printing one JSON document:
 
 ```bash
 rspd inspect MODEL [--layers SPEC]
