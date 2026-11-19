@@ -61,7 +61,7 @@ def ref(tmp_path_factory):
         pytest.skip(f"cannot export {REF} of the reference: {proc.stderr.decode()[:200]}")
     root = tmp_path_factory.mktemp("reference")
     with tarfile.open(fileobj=io.BytesIO(proc.stdout)) as tf:
-        tf.extractall(root, filter="data")
+        tf.extractall(root, **({"filter": "data"} if hasattr(tarfile, "data_filter") else {}))
     saved_path = list(sys.path)
     swap = ModuleSwap(extra=("common", "gpt2_tiny_helpers", MODNAME))
     swap.begin()
