@@ -55,7 +55,7 @@ def test_readme_quickstart_runs(tmp_path, monkeypatch):
 
 def test_readme_is_in_the_agreed_order_and_makes_no_comparisons():
     text = (ROOT / "README.md").read_text()
-    order = ["# rspd", "assets/demo.gif", "The unsupervised variant is coming soon",
+    order = ["# Representation Space-aware Parameter Decomposition (RSPD)", "assets/demo.gif", "The unsupervised variant is coming soon",
              "pip install rspd", "## Quickstart", "from rspd import SRSPD", "## How it works",
              "rank(W X) ≤ min(rank(W), rank(X))", "parameter decomposition", "## Examples",
              "colab.research.google.com/github/ThatE10/rspd/blob/main/examples/quickstart.ipynb",
