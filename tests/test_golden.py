@@ -22,7 +22,10 @@ safetensors = pytest.importorskip("safetensors.torch")
 import make_golden  # noqa: E402
 
 FIX = pathlib.Path(__file__).resolve().parent / "fixtures"
-REL = 1e-6
+#: The activations and the edit are single precision, and BLAS differs between CPUs: the same
+#: commit gives 4e-6 relative differences between two hosted runners. Bit-for-bit agreement is the
+#: live parity tests' job; this record catches a change in the numbers.
+REL = 1e-4
 
 
 @pytest.fixture(scope="module")

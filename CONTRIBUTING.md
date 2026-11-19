@@ -43,5 +43,5 @@ python assets/make_demo.py   # writes assets/demo.gif
 Three test files compare this package bit for bit with the research code it was distilled
 from. They run only when `RSPD_REFERENCE_REPO` names a checkout of that (private) repository,
 and skip otherwise. `tests/test_golden.py` carries the same agreement as a frozen record for
-everyone else; regenerate it with `python tests/make_golden.py` only at a commit where the live
+everyone else (to 1e-4: single-precision results differ slightly between CPUs); regenerate it with `python tests/make_golden.py` only at a commit where the live
 tests pass.
