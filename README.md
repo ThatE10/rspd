@@ -6,7 +6,7 @@
   <img src="https://raw.githubusercontent.com/ThatE10/rspd/v0.0.1/assets/demo.gif" alt="A point moves through two overlapping sets X and Y in an input activation space. The layer W carries the whole space across. The component M carries only what X alone uses." width="460">
 </p>
 
-> **Status.** Unsupervised variant coming soon!  
+> **Status.** Unsupervised variant & Training Methodologies coming soon!  
 
 ## Install
 
