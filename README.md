@@ -1,6 +1,6 @@
 # Representation Space-aware Parameter Decomposition (RSPD)
 
-**localize features within the parameter space.**
+**Localize features within the parameter space.**
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/ThatE10/rspd/v0.0.1/assets/demo.gif" alt="A point moves through two overlapping sets X and Y in an input activation space. The layer W carries the whole space across. The component M carries only what X alone uses." width="460">
@@ -14,9 +14,9 @@
 pip install rspd
 ```
 
-This installs `torch`, `transformers` and `safetensors`, which is what working on Hugging Face models needs. `rspd[experiments]` adds the data builders, baselines and evaluation used in the experiments.
+This requires installs `torch`, `transformers` and `safetensors` in order for the HuggingFace integration. `rspd[experiments]` adds the data builders, baselines and evaluation used in the paper.
 
-The mathematics in `rspd.core` needs only `torch`. For that alone: `pip install --no-deps rspd`, with `torch` already installed.
+The slim mathematical core exist in `rspd.core` needing only `torch`. For that alone: `pip install --no-deps rspd`, with `torch` already installed.
 
 ## Quickstart
 
@@ -29,12 +29,12 @@ tokenizer = AutoTokenizer.from_pretrained("gpt2")
 dutch, english = ["De kat zit op de mat."], ["The cat sits on the mat."]  # placeholders, see below
 
 srspd = SRSPD(model, tokenizer)                    # attach
-components = srspd.fit(target=dutch, retained=english, mu_per_token=1.0)
+components = srspd.fit(target=dutch, retained=english, mu_per_token=0.3)
 components.apply()                                 # W <- W - M in every layer
 components.restore()                               # bit-for-bit undo
 ```
 
-`target` is the behaviour to remove and `retained` is the behaviour to keep. The one-sentence lists above only show the shape of the call: with so little text the edit damages everything. A real fit wants about a thousand tokens of target and tens of thousands of retained text, as in the [Dutch example](examples/erase_dutch.ipynb). `fit` does not change the model. It returns one `Component` per weight matrix, with its factors `A` and `B` (`M = A @ B`) and its leaks. `mu_per_token` is the dose: larger removes more.
+`target` is the behaviour to remove and `retained` is the behaviour to keep. The one-sentence lists above only show the shape of the call. A real fit wants about a thousand tokens of target and tens of thousands of retained text, as in the [Dutch example](examples/erase_dutch.ipynb). `fit` is only computational. The fit functions returns one `Component` per weight matrix, with its factors `A` and `B` (`M = A @ B`) and the error. `mu_per_token` is the dose: larger removes more.
 
 ## How it works
 
@@ -44,7 +44,7 @@ A linear layer only ever acts on the activations it is given. For a set of activ
 rank(W X) ≤ min(rank(W), rank(X))
 ```
 
-So however large `W` is, the part of it that a behaviour uses is no bigger than that behaviour's activations. RSPD reads that part off the activations themselves instead of off the weights. This is the idea behind parameter decomposition, which inspired the technique: a network's weights are a sum of components, each doing one thing.
+So however large `W` is, the part of it that a behaviour uses is no bigger than the manifold that behaviour activations acts on. RSPD reads that part off the activations themselves instead of off the weights. This is the idea behind [parameter decomposition](https://arxiv.org/pdf/2506.20790), which inspired the technique: a network's weights are a sum of components, each doing one thing.
 
 SRSPD, the supervised variant, takes two sets of activations: a **target** `X` to remove and a **retained** set `Y` to keep. It asks for the component `M` that reproduces the layer on the target and is as quiet as possible on the retained set:
 
@@ -60,10 +60,8 @@ Every fit also measures its **leaks** for each matrix: how much of the layer's r
 
 | | | |
 | --- | --- | --- |
-| [Quickstart on a toy](examples/quickstart.ipynb) | Two overlapping sets and one layer, small enough to see whole. CPU, a few seconds. | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ThatE10/rspd/blob/main/examples/quickstart.ipynb) |
-| [Erase Dutch from an open language model](examples/erase_dutch.ipynb) | Remove one language from a model and keep the others, on a free Colab GPU. No account needed. | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ThatE10/rspd/blob/main/examples/erase_dutch.ipynb) |
-
-The animation at the top is drawn from a real solve on the toy: `python assets/make_demo.py`.
+| [Quickstart on a toy](examples/quickstart.ipynb) | Two overlapping sets are found using SRSPD (runs on the CPU) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ThatE10/rspd/blob/main/examples/quickstart.ipynb) |
+| [Erase Dutch from an open language model](examples/erase_dutch.ipynb) | Remove dutch language from a model and keep the others, on a free Cloud GPU | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ThatE10/rspd/blob/main/examples/erase_dutch.ipynb) |
 
 ## Documentation
 
